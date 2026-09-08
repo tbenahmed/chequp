@@ -32,6 +32,7 @@ void actual_conductivity (T& state)
 {
     // Infer electron density by summing over species and assuming overall neutrality
     // See https://github.com/AMReX-Astro/Microphysics/blob/main/EOS/gamma_law/actual_eos.H#L62
+     // Calculate neutral, electron, and Z^2-weighted ion number densities [m-3]
     amrex::Real n_n_species[num_atom_species] = {};
     amrex::Real n_e   = 0.0;
     amrex::Real n_iZ2 = 0.0;
@@ -52,7 +53,7 @@ void actual_conductivity (T& state)
 
     // Get collision frequencies
     amrex::Real v_ei;
-    amrex::Real v_en_atom[num_atom_species] = {}; // one entry per ATOM, not per stage
+    amrex::Real v_en_atom[num_atom_species] = {}; // one entry per species
 
     const amrex::Real T_h = T_e; // TODO: Extract correct ion temperature (this is only used for the Coulomb logarithm)
 
@@ -73,8 +74,7 @@ void actual_conductivity (T& state)
     const amrex::Real Z_eff = n_iZ2 / n_e;
     const amrex::Real v_ei_tot = v_ei * Z_eff;
     // Calculate thermal conductivity using Eq. B1 in https://arxiv.org/pdf/2305.16779
-    // The coefficient 3.16 comes from matching the Spitzer-Harm conductivity
-    // in the fully ionized case (v_en = 0)
+    // Dependance on Z_eff is fitted from Braginskii's results for Z>1.
     const amrex::Real gamma0   = 12.471_rt * (Z_eff + 0.112_rt) / (Z_eff + 3.386_rt);
 
     // Eq. B1 in https://arxiv.org/pdf/2305.16779, with the Braginskii

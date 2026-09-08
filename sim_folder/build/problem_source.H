@@ -62,7 +62,7 @@ void problem_source (int i, int j, int k,
         X_e += zion[mu] * X_stage[mu] * aion_inv[mu];
     }
     
-    // Calculate electron, neutral and Z^2-weighted ion number densities (SI units)
+    // Calculate neutral, electron, and Z^2-weighted ion number densities [m-3]
     amrex::Real n_e = 0.0;
     amrex::Real n_n_species[num_atom_species] = {};
     amrex::Real n_iZ2[num_atom_species] = {};
@@ -84,7 +84,7 @@ void problem_source (int i, int j, int k,
     for (int mu = 0; mu < NumSpec; mu++) {
         n_h += X_stage[mu] * rho * aion_inv[mu] / C::m_u * 1.e6;
     }
-    
+
     // Initialize sources
     Real e_ion = 0.0;
 
@@ -114,7 +114,7 @@ void problem_source (int i, int j, int k,
     src(i,j,k,UEDEN) += e_ion;
     src(i,j,k,UEINT) += e_ion;
 
-    // Compute collision frequencies
+    // Compute collision frequencies (ei: electron-ion, en: electron-neutral)
     amrex::Real v_ei;
     amrex::Real v_en_atom[num_atom_species] = {};
     const amrex::Real T_h = T_e;
@@ -123,12 +123,15 @@ void problem_source (int i, int j, int k,
     // Total energy-transfer collision frequency, accumulated once per atom
     amrex::Real nu_E = 0.0;
     for (int a = 0; a < num_atom_species; ++a) {
+        // Mass of the atom
         const amrex::Real m_a = aion[atom_first_species[a]] * C::m_u * 1.e-3;
+        // If no electrons, no collision frequency
         const amrex::Real nu_ei_a = (n_e > 0.0) ? v_ei * n_iZ2[a] / n_e : 0.0;
         nu_E += 2.0 * SI::m_e / m_a * (nu_ei_a + v_en_atom[a]);
     }
 
     // Energy transfer source term
+    // If no heavy particles, no energy transfer
     const amrex::Real Sc = (n_h > 0.0) ? rho * nu_E * (1.0 - (1.0 + n_e / n_h) * f) : 0.0;
 
     // Protect against division by zero if internal energy is practically 0
