@@ -61,35 +61,7 @@ void problem_source (int i, int j, int k,
         int mu = active_spec[ispe];
         X_e += zion[mu] * X_stage[mu] * aion_inv[mu];
     }
-    // Initialize sources
-    Real e_ion = 0.0;
-
-    for (int ispe = 0; ispe < n_active; ispe++) {
-        int beta = active_spec[ispe];
-        int beta_next = beta + 1;
-        int atom_idx = get_atom_index(beta);
-
-        if (beta_next < NumSpec && get_atom_index(beta_next) == atom_idx && zion[beta] < zatom[atom_idx]) {
-            // Calculate Rates
-            Real coll_I_d = X_stage[beta] * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
-            Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
-            Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, rho, T_e);
-            // Net Rate Coefficient
-            Real const coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
-            // Update Mass Fraction Sources
-            src(i,j,k,UFS+beta)      -= coeff;
-            src(i,j,k,UFS+beta_next) += coeff;
-            // Energy Update
-            int idx_Eion = get_energy_index(zatom[atom_idx]) + zion[beta];
-            Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
-            e_ion -= coeff * (E_ion_erg / (aion[beta] * C::m_p));
-        }
-    }
-
-    // Update energy source terms
-    src(i,j,k,UEDEN) += e_ion;
-    src(i,j,k,UEINT) += e_ion;
-
+    
     // Calculate electron, neutral and Z^2-weighted ion number densities (SI units)
     amrex::Real n_e = 0.0;
     amrex::Real n_n_species[num_atom_species] = {};
@@ -107,12 +79,41 @@ void problem_source (int i, int j, int k,
         }
     }
 
-    // Total heavy-particle density over ALL stages, so the bracket does not
-    // depend on which species happen to be active
+    // Total heavy-particle density over all stages
     amrex::Real n_h = 0.0;
     for (int mu = 0; mu < NumSpec; mu++) {
         n_h += X_stage[mu] * rho * aion_inv[mu] / C::m_u * 1.e6;
     }
+    
+    // Initialize sources
+    Real e_ion = 0.0;
+
+    for (int ispe = 0; ispe < n_active; ispe++) {
+        int beta = active_spec[ispe];
+        int beta_next = beta + 1;
+        int atom_idx = get_atom_index(beta);
+
+        if (beta_next < NumSpec && get_atom_index(beta_next) == atom_idx && zion[beta] < zatom[atom_idx]) {
+            // Calculate Rates
+            Real coll_I_d = X_stage[beta] * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
+            Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
+            Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
+            // Net Rate Coefficient
+            Real const coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
+            // Update Mass Fraction Sources
+            src(i,j,k,UFS+beta)      -= coeff;
+            src(i,j,k,UFS+beta_next) += coeff;
+            // Energy Update
+            int idx_Eion = get_energy_index(zatom[atom_idx]) + zion[beta];
+            Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
+            e_ion -= coeff * (E_ion_erg / (aion[beta] * C::m_p));
+        }
+    }
+
+    // Update energy source terms
+    src(i,j,k,UEDEN) += e_ion;
+    src(i,j,k,UEINT) += e_ion;
+
     // Compute collision frequencies
     amrex::Real v_ei;
     amrex::Real v_en_atom[num_atom_species] = {};
