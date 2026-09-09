@@ -87,7 +87,7 @@ enum DiffMode { MODE_OFF = 0, MODE_IMPLICIT = 1, MODE_MG = 2 };
 enum PrecondType { PC_JACOBI = 0, PC_MG = 1 };
 
 struct Params {
-    DiffMode    mode    = MODE_IMPLICIT;
+    DiffMode    mode    = MODE_MG;
     PrecondType precond = PC_MG;
 
     // Castro evaluates ext_src more than once per step from the same
@@ -663,7 +663,7 @@ struct Precond {
         return res;
     }
 
-private:
+public:
 
     // The exact diagonal of the discretized Jacobian,
     //
