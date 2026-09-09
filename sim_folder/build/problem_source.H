@@ -75,25 +75,36 @@ void problem_source (int i, int j, int k,
         const int mu = active_spec[n];
         X_e += zion[mu] * X_stage[mu] * aion_inv[mu];
     }
+    
+    // Calculate electron and neutral number densities m-3
+    Real n_e = 0.0;
+    amrex::Real n_n_species[num_atom_species] = {};
 
-    // --- ionization / three-body recombination -----------------------
-    Real e_ion = 0.0_rt;
+    for (int ispe = 0; ispe < n_active; ispe++) {
+        int mu = active_spec[ispe];
+        const amrex::Real n_mu = X_stage[mu] * rho * aion_inv[mu] / C::m_u * 1.e6;
+        n_e += zion[mu] * n_mu;
+        if (zion[mu] == 0) {
+            int idx_atom = get_atom_index(mu);
+            n_n_species[idx_atom] += n_mu;
+        }
+    }
+    // Initialize sources
+    Real e_ion = 0.0;
 
-    for (int n = 0; n < n_active; ++n) {
-        const int beta      = active_spec[n];
-        const int beta_next = beta + 1;
-        const int atom_idx  = get_atom_index(beta);
+    for (int ispe = 0; ispe < n_active; ispe++) {
+        int beta = active_spec[ispe];
+        int beta_next = beta + 1;
+        int atom_idx = get_atom_index(beta);
 
-        if (beta_next < NumSpec &&
-            get_atom_index(beta_next) == atom_idx &&
-            zion[beta] < zatom[atom_idx])
-        {
-            const Real coll_I_d   = X_stage[beta]   * X_e       * coll_ion::get_rate_direct_ion(beta, T_e);
-            const Real coll_I_e   = X_stage[beta]   * X_e       * coll_ion::get_rate_ex_ion(beta, T_e);
-            const Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, rho, T_e);
-
-            const Real coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
-
+        if (beta_next < NumSpec && get_atom_index(beta_next) == atom_idx && zion[beta] < zatom[atom_idx]) {
+            // Calculate Rates
+            Real coll_I_d = X_stage[beta] * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
+            Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
+            Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
+            // Net Rate Coefficient
+            Real const coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
+            // Update Mass Fraction Sources
             src(i,j,k,UFS+beta)      -= coeff;
             src(i,j,k,UFS+beta_next) += coeff;
 
@@ -110,20 +121,10 @@ void problem_source (int i, int j, int k,
     src(i,j,k,UEDEN) = e_ion + diff_e;
     src(i,j,k,UEINT) = e_ion + diff_e;
 
-    // --- electron-heavy energy exchange ------------------------------
-    Real n_e = 0.0_rt;
-    Real n_n_species[num_atom_species] = {};
-
-    for (int n = 0; n < n_active; ++n) {
-        const int  mu   = active_spec[n];
-        const Real n_mu = X_stage[mu] * rho * aion_inv[mu] / C::m_u * 1.e6_rt;
-        n_e += zion[mu] * n_mu;
-        if (zion[mu] == 0) { n_n_species[get_atom_index(mu)] += n_mu; }
-    }
-
-    Real v_ei;
-    Real v_en[NumSpec];
-    const Real T_h = T_e;   // TODO: use the true heavy temperature here
+    // Compute collision frequencies
+    amrex::Real v_ei;
+    amrex::Real v_en[NumSpec];
+    const amrex::Real T_h = T_e;
     get_collision_frequencies(n_e, n_n_species, T_e, T_h, v_ei, v_en);
 
     Real v_e_E[NumSpec] = {};
