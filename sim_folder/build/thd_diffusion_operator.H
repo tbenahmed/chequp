@@ -1,7 +1,7 @@
 #ifndef THD_DIFFUSION_OPERATOR_H
 #define THD_DIFFUSION_OPERATOR_H
 
-// Linear/Nonlinear un-limited electron thermal diffusion operator for two-temperature
+// Un-limited electron thermal diffusion operator for two-temperature
 // (gamma_law_2T) Castro setups:
 //   L = div( kappa * grad(Te) )
 
@@ -207,7 +207,9 @@ Real cell_metric (int i, int j, int k, int idir,
     return fac;
 }
 
-// Precomputes face-centered conductivities and metrics
+// Precomputes face-centered conductivities and metrics.
+// Each interior face is evaluated once, on the face grid -- computing
+// them per cell would evaluate every interior face twice.
 inline void
 compute_face_coeffs (const MultiFab& coef,
                      Array<MultiFab,AMREX_SPACEDIM>& fk,
@@ -256,7 +258,8 @@ compute_face_coeffs (const MultiFab& coef,
 }
 
 
-// Computes L = div( kappa * grad(Te) ) at (i,j,k)
+// Computes L = div( kappa * grad(Te) ) at (i,j,k) from precomputed face
+// coefficients: a 2*DIM+1 point read-and-multiply-add, no EOS work.
 
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
 Real div_kappa_grad_Te (int i, int j, int k,
@@ -306,10 +309,15 @@ Real div_kappa_grad_Te (int i, int j, int k,
     return amrex::Math::isfinite(L) ? L : 0.0_rt;
 }
 
-// Reusable workspace container for solver iterations
+// Reusable workspace. Everything the solver needs repeatedly lives here
+// so nothing is reallocated across the ~120 residual evaluations of a
+// single solve: cell coefficients, face conductivities, and scratch for
+// the Laplacian and the perturbed state.
 struct Workspace {
-    MultiFab                        coef;
-    Array<MultiFab,AMREX_SPACEDIM>  fk;
+    MultiFab                        coef;   // CTE, CKAP; 1 ghost
+    Array<MultiFab,AMREX_SPACEDIM>  fk;     // face conductivities
+    MultiFab                        lap;    // scratch for L
+    MultiFab                        scratch;// scratch, 1 component
 
     void define (const BoxArray& ba, const DistributionMapping& dm)
     {
@@ -318,6 +326,8 @@ struct Workspace {
         for (int d = 0; d < AMREX_SPACEDIM; ++d) {
             fk[d].define(amrex::convert(ba, IntVect::TheDimensionVector(d)), dm, 1, 0);
         }
+        lap.define(ba, dm, 1, 0);
+        scratch.define(ba, dm, 1, 0);
     }
 };
 
@@ -336,6 +346,8 @@ compute_L (const MultiFab& state, MultiFab& L_mf, const Geometry& geom,
     compute_coeffs(state, w->coef);
     compute_face_coeffs(w->coef, w->fk, geom);
 
+    // *Array() returns by value; geom.CellSize() would be a host pointer
+    // captured into a device lambda.
     const amrex::GpuArray<Real,AMREX_SPACEDIM> problo = geom.ProbLoArray();
     const amrex::GpuArray<Real,AMREX_SPACEDIM> dx     = geom.CellSizeArray();
     const int coord = geom.Coord();

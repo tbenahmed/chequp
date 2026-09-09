@@ -14,10 +14,54 @@
 //
 // which is what makes the EOS return the electron temperature.
 //
+//
+// THE LINEAR SYSTEM, AND WHY MLMG BELONGS IN IT
+// ---------------------------------------------
+// The Frechet derivative of F, with s = dTe/dE = Te/E_e (exact for a
+// gamma-law electron gas), is
+//
+//   J v = v - dt*div( kappa grad(s v) ) - dt*div( v s kappa' grad Te ).
+//
+// Change variables to the TEMPERATURE perturbation w = s v. The first
+// two terms become
+//
+//   M w = (E_e/Te) w - dt*div( kappa grad w ),
+//
+// which is exactly MLABecLaplacian with A = 1, alpha = E_e/Te, B = dt,
+// beta = kappa on faces, and homogeneous Neumann/periodic BCs -- the
+// same face coefficients the operator already builds. This is a shifted
+// variable-coefficient Laplacian: MLMG solves it with an iteration
+// count independent of dx, where point-Jacobi-preconditioned GMRES does
+// not, since cond(J) ~ 1 + dt*chi/dx^2.
+//
+// The third term (kappa' = 2.5*kappa/Te for Spitzer, so comparable to or
+// larger than the second at a steep front, and non-symmetric) cannot go
+// into an MLABecLaplacian. That gives the two schemes below:
+//
+//   MODE_IMPLICIT  Exact Newton. The matvec stays matrix-free (finite
+//                  differences on F, so ALL of J including kappa'), and
+//                  M^{-1} -- a fixed number of MLMG V-cycles -- is used
+//                  as the left preconditioner instead of the diagonal.
+//                  Quadratic convergence, few Krylov iterations.
+//
+//   MODE_MG        Frozen-coefficient Newton. Drop the kappa' term, so
+//                  J = M exactly and there is no Krylov layer at all:
+//                  one MLMG solve per Newton iteration gives the
+//                  direction directly. Linear convergence, but each
+//                  iteration is much cheaper and there is no
+//                  finite-difference step to tune.
+//
+// Both produce a direction dE = (E_e/Te) * w and then share the same
+// line search, source back-out and cache, so they are directly
+// comparable at runtime.
+//
 #include <thd_diffusion_operator.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_ParmParse.H>
+#include <AMReX_Reduce.H>
+#include <AMReX_MLABecLaplacian.H>
+#include <AMReX_MLMG.H>
 #include <vector>
 #include <string>
 #include <memory>
@@ -28,12 +72,23 @@ namespace thd_jfnk {
 
 //   MODE_OFF       contribute nothing. Use with castro.diffuse_temp = 1
 //                  to run Castro's own explicit diffusion instead.
-//   MODE_IMPLICIT  backward-Euler JFNK (the real scheme).
+//   MODE_IMPLICIT  backward-Euler JFNK, exact Jacobian, MG-preconditioned.
+//   MODE_MG        backward-Euler with frozen conductivity, MLMG only.
 
-enum DiffMode { MODE_OFF = 0, MODE_IMPLICIT = 1 };
+enum DiffMode { MODE_OFF = 0, MODE_IMPLICIT = 1, MODE_MG = 2 };
+
+//   PC_JACOBI  exact diagonal of the discretized Jacobian. Kept as a
+//              fallback and as an A/B baseline: it is the diagonal of
+//              the same M that PC_MG inverts (see Precond::update), so
+//              switching between them changes only the quality of the
+//              approximation, never the equation being solved.
+//   PC_MG      a fixed number of MLMG V-cycles on M.
+
+enum PrecondType { PC_JACOBI = 0, PC_MG = 1 };
 
 struct Params {
-    DiffMode mode = MODE_IMPLICIT;
+    DiffMode    mode    = MODE_IMPLICIT;
+    PrecondType precond = PC_MG;
 
     // Castro evaluates ext_src more than once per step from the same
     // old-time state. Reuse the result when the input is identical;
@@ -46,20 +101,51 @@ struct Params {
 
     // Newton. Tolerance is relative to the energy scale, not to the
     // initial residual, which would be self-referential.
+    //
+    // MODE_MG converges linearly, not quadratically, so it needs a
+    // larger iteration budget than MODE_IMPLICIT for the same tolerance.
     int  max_newton     = 20;
     Real newton_rtol    = 1.0e-6_rt;
     int  max_linesearch = 8;
     Real fd_eps         = 1.0e-7_rt;   // finite-difference step for J*v
 
-    // Krylov. max_gmres = 0 auto-sizes from the grid. gmres_rtol is
-    // deliberately loose: do not resolve the linear system beyond the
-    // accuracy of the current Newton direction.
-    int  max_gmres   = 0;
-    Real gmres_rtol  = 1.0e-4_rt;
+    // Krylov (MODE_IMPLICIT only). max_gmres = 0 auto-sizes from the
+    // grid, capped at gmres_ceiling. With PC_MG the count should be
+    // single digits and dx-independent, so the ceiling is a diagnostic
+    // rather than a real limit: if it is ever reached, the warning
+    // below means the preconditioner is not doing its job.
+    int  max_gmres      = 0;
+    int  gmres_ceiling  = 120;
+    Real gmres_rtol     = 1.0e-4_rt;
 
     // Second Gram-Schmidt pass when orthogonalization collapses the
     // vector norm by more than this factor. 0 disables.
     Real reorth_tol = 0.7_rt;
+
+    // MLMG.
+    //
+    // mg_fixed_iter: V-cycles per PRECONDITIONER application. GMRES
+    //   requires a FIXED LINEAR operator, so this is a fixed count, not
+    //   a tolerance -- a tolerance-based inner solve makes M^{-1}
+    //   depend on its own right-hand side and the Arnoldi relation
+    //   silently stops holding. Use FGMRES if you want that.
+    // mg_bottom_smoother: for the same reason, the bottom solve defaults
+    //   to plain smoothing rather than BiCGStab, whose iteration count
+    //   depends on the right-hand side. Irrelevant in MODE_MG.
+    // mg_rtol / mg_max_iter: MODE_MG only, where the MLMG solve IS the
+    //   linear solve and a tolerance is the right control.
+    int  mg_fixed_iter         = 2;
+    bool mg_bottom_smoother    = true;
+    Real mg_rtol               = 1.0e-6_rt;
+    Real mg_atol               = 0.0_rt;
+    int  mg_max_iter           = 100;
+    int  mg_pre_smooth         = 2;
+    int  mg_post_smooth        = 2;
+    int  mg_max_coarsening_lev = 30;
+    bool mg_agglomeration      = true;
+    bool mg_consolidation      = true;
+    int  mg_verbose            = 0;
+    int  mg_bottom_verbose     = 0;
 
     // Per-step diagnostics. Costs two extra coefficient evaluations.
     bool verbose = false;
@@ -67,10 +153,18 @@ struct Params {
 
 
 // Runtime parameters, read once from the inputs file.
-//   implicit scheme    thd_diffusion.mode   = implicit
-//                      castro.diffuse_temp = 0
-//   explicit baseline  thd_diffusion.mode   = off
-//                      castro.diffuse_temp = 1
+//   exact Newton, MG-preconditioned
+//                      thd_diffusion.mode    = implicit
+//                      thd_diffusion.precond = mg
+//                      castro.diffuse_temp   = 0
+//   frozen-coefficient, MLMG only
+//                      thd_diffusion.mode    = mg
+//                      castro.diffuse_temp   = 0
+//   old behaviour (diagonal preconditioner)
+//                      thd_diffusion.mode    = implicit
+//                      thd_diffusion.precond = jacobi
+//   explicit baseline  thd_diffusion.mode    = off
+//                      castro.diffuse_temp   = 1
 
 inline Params& runtime_params ()
 {
@@ -85,21 +179,52 @@ inline Params& runtime_params ()
     if (pp.query("mode", m)) {
         if      (m == "off")      { p.mode = MODE_OFF; }
         else if (m == "implicit") { p.mode = MODE_IMPLICIT; }
-        else { amrex::Abort("thd_diffusion.mode must be 'off' or 'implicit'"); }
+        else if (m == "mg")       { p.mode = MODE_MG; }
+        else { amrex::Abort("thd_diffusion.mode must be 'off', 'implicit' or 'mg'"); }
     }
 
-    pp.query("source_scale", p.source_scale);
-    pp.query("max_newton",   p.max_newton);
-    pp.query("newton_rtol",  p.newton_rtol);
-    pp.query("max_gmres",    p.max_gmres);
-    pp.query("gmres_rtol",   p.gmres_rtol);
-    pp.query("reorth_tol",   p.reorth_tol);
-    pp.query("fd_eps",       p.fd_eps);
+    std::string pcs;
+    if (pp.query("precond", pcs)) {
+        if      (pcs == "jacobi") { p.precond = PC_JACOBI; }
+        else if (pcs == "mg")     { p.precond = PC_MG; }
+        else { amrex::Abort("thd_diffusion.precond must be 'jacobi' or 'mg'"); }
+    }
+
+    pp.query("source_scale",  p.source_scale);
+    pp.query("max_newton",    p.max_newton);
+    pp.query("newton_rtol",   p.newton_rtol);
+    pp.query("max_gmres",     p.max_gmres);
+    pp.query("gmres_ceiling", p.gmres_ceiling);
+    pp.query("gmres_rtol",    p.gmres_rtol);
+    pp.query("reorth_tol",    p.reorth_tol);
+    pp.query("fd_eps",        p.fd_eps);
+
+    pp.query("mg_fixed_iter",         p.mg_fixed_iter);
+    pp.query("mg_rtol",               p.mg_rtol);
+    pp.query("mg_atol",               p.mg_atol);
+    pp.query("mg_max_iter",           p.mg_max_iter);
+    pp.query("mg_pre_smooth",         p.mg_pre_smooth);
+    pp.query("mg_post_smooth",        p.mg_post_smooth);
+    pp.query("mg_max_coarsening_lev", p.mg_max_coarsening_lev);
+    pp.query("mg_verbose",            p.mg_verbose);
+    pp.query("mg_bottom_verbose",     p.mg_bottom_verbose);
 
     int itmp = p.verbose ? 1 : 0;
     if (pp.query("verbose", itmp))   { p.verbose = itmp; }
     itmp = p.use_cache ? 1 : 0;
     if (pp.query("use_cache", itmp)) { p.use_cache = itmp; }
+    itmp = p.mg_agglomeration ? 1 : 0;
+    if (pp.query("mg_agglomeration", itmp)) { p.mg_agglomeration = itmp; }
+    itmp = p.mg_consolidation ? 1 : 0;
+    if (pp.query("mg_consolidation", itmp)) { p.mg_consolidation = itmp; }
+    itmp = p.mg_bottom_smoother ? 1 : 0;
+    if (pp.query("mg_bottom_smoother", itmp)) { p.mg_bottom_smoother = itmp; }
+
+    if (p.mg_fixed_iter < 1) {
+        amrex::Abort("thd_diffusion.mg_fixed_iter must be >= 1: a "
+                     "tolerance-controlled inner solve is not a fixed linear "
+                     "preconditioner and breaks GMRES.");
+    }
 
     // Castro's own temperature diffusion is EXPLICIT (it evaluates
     // div(kappa grad T) and adds it as a source, with estdt_temp_diffusion
@@ -120,9 +245,14 @@ inline Params& runtime_params ()
     }
 
     if (p.verbose) {
-        amrex::Print() << "[THD-JFNK] mode = "
-                       << ((p.mode == MODE_OFF) ? "off" : "implicit")
-                       << ", castro.diffuse_temp = " << castro_diffuse_temp << "\n";
+        const char* mname = (p.mode == MODE_OFF) ? "off"
+                          : (p.mode == MODE_MG)  ? "mg" : "implicit";
+        amrex::Print() << "[THD-JFNK] mode = " << mname;
+        if (p.mode == MODE_IMPLICIT) {
+            amrex::Print() << ", precond = "
+                           << ((p.precond == PC_MG) ? "mg" : "jacobi");
+        }
+        amrex::Print() << ", castro.diffuse_temp = " << castro_diffuse_temp << "\n";
     }
     return p;
 }
@@ -132,7 +262,8 @@ inline Params& runtime_params ()
 //
 // FillBoundary covers same-level and periodic ghosts. Ghosts OUTSIDE the
 // domain are then filled by zero-gradient extrapolation, a no-flux
-// (adiabatic) thermal wall.
+// (adiabatic) thermal wall -- the same condition MLABecLaplacian is
+// given below as homogeneous Neumann.
 //
 // Ghosts at a COARSE-FINE boundary are touched by neither, and are left
 // at the FillPatch values the caller supplied.
@@ -232,11 +363,14 @@ refresh_aux (MultiFab& state, const MultiFab& Eh)
 
 // F(E) = E - E^n - dt*L(E). `state` needs filled ghosts and an aux
 // consistent with its UEINT.
+//
+// The Laplacian scratch comes from the workspace: allocating it here
+// would mean one MultiFab per residual, and a solve performs ~120.
 inline void
 residual (const MultiFab& state, const MultiFab& En, MultiFab& F,
-          const Geometry& geom, Real dt, thd_diff::Workspace* ws = nullptr)
+          const Geometry& geom, Real dt, thd_diff::Workspace* ws)
 {
-    MultiFab L(F.boxArray(), F.DistributionMap(), 1, 0);
+    MultiFab& L = ws->lap;
     thd_diff::compute_L(state, L, geom, ws);
 
 #ifdef _OPENMP
@@ -287,180 +421,348 @@ apply_update (MultiFab& state, const MultiFab& base, const MultiFab& delta,
     refresh_aux(state, Eh);
 }
 
-
-// Matrix-free J*v ~= [F(E + eps*v) - F(E)] / eps
+// Minimum electron energy E - E_h over the valid region, in one fused
+// reduction. Doing it as copy + subtract + min would cost two kernels,
+// a reduction and a MultiFab, up to max_linesearch times per Newton
+// iteration.
 //
-// Both norms in eps must be the same norm; mixing L2 for the state with
-// L-infinity for the direction inflates eps by ~sqrt(N).
-//
-// pert and base are supplied by the caller and reused: only UEINT
-// changes per Krylov iteration, so the full state copy happens once per
-// solve rather than once per iteration.
-
-inline void
-jac_vec (const MultiFab& state, const MultiFab& F0, const MultiFab& v,
-         MultiFab& Jv, const MultiFab& En, const MultiFab& Eh,
-         const Geometry& geom, Real dt, const Params& p,
-         MultiFab* pert_ws = nullptr, MultiFab* base_ws = nullptr,
-         thd_diff::Workspace* ws = nullptr)
+// E > E_h also implies E > 0 (E_h >= 0 by construction), so no separate
+// positivity reduction is needed.
+inline Real
+min_electron_energy (const MultiFab& state, const MultiFab& Eh)
 {
-    const Real norm_E = state.norm2(UEINT);
-    const Real norm_v = v.norm2(0);
-    const Real eps = p.fd_eps * (norm_E + 1.0_rt) / (norm_v + 1.0e-300_rt);
+    ReduceOps<ReduceOpMin> reduce_op;
+    ReduceData<Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
 
-    MultiFab  pert_local;
-    MultiFab  base_local;
-    MultiFab* pert = pert_ws;
-    MultiFab* base = base_ws;
-
-    if (pert == nullptr) {
-        pert_local.define(state.boxArray(), state.DistributionMap(),
-                          state.nComp(), state.nGrow());
-        MultiFab::Copy(pert_local, state, 0, 0, state.nComp(), state.nGrow());
-        pert = &pert_local;
-    }
-    if (base == nullptr) {
-        base_local.define(state.boxArray(), state.DistributionMap(), 1, 0);
-        MultiFab::Copy(base_local, state, UEINT, 0, 1, 0);
-        base = &base_local;
-    }
-
-    apply_update(*pert, *base, v, eps, Eh, geom);
-
-    MultiFab Feps(F0.boxArray(), F0.DistributionMap(), 1, 0);
-    residual(*pert, En, Feps, geom, dt, ws);
-
-    MultiFab::LinComb(Jv, 1.0_rt/eps, Feps, 0, -1.0_rt/eps, F0, 0, 0, 1, 0);
-}
-
-
-// Preconditioner: the exact diagonal of the discretized Jacobian,
-//
-//   d = 1 + dt * sum_dir m_dir * (k_lo + k_hi) * dTe/dE,
-//
-// using the same face coefficients and cell metric as the operator, so
-// the two cannot drift apart. dTe/dE = Te/E_e is exact for a gamma-law
-// electron gas.
-//
-// The diagonal depends only on the Newton iterate, so it is constant
-// across a GMRES solve and is built once per Newton iteration. It never
-// enters the residual: an imperfect diagonal costs iterations, not
-// accuracy.
-
-inline void
-build_precond (const MultiFab& state, const MultiFab& Eh, MultiFab& diag,
-               const Geometry& geom, Real dt, thd_diff::Workspace* ws = nullptr)
-{
-    thd_diff::Workspace local;
-    thd_diff::Workspace* w = ws;
-    if (w == nullptr) {
-        local.define(state.boxArray(), state.DistributionMap());
-        w = &local;
-    }
-    thd_diff::compute_coeffs(state, w->coef);
-    thd_diff::compute_face_coeffs(w->coef, w->fk, geom);
-
-    // *Array() returns by value; geom.CellSize() would be a host pointer
-    // captured into a device lambda.
-    const amrex::GpuArray<Real,AMREX_SPACEDIM> problo = geom.ProbLoArray();
-    const amrex::GpuArray<Real,AMREX_SPACEDIM> dx     = geom.CellSizeArray();
-    const int coord = geom.Coord();
-
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    for (MFIter mfi(diag, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+    for (MFIter mfi(Eh, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         Array4<Real const> const s  = state.const_array(mfi);
-        Array4<Real const> const cc = w->coef.const_array(mfi);
         Array4<Real const> const eh = Eh.const_array(mfi);
-        AMREX_D_TERM(Array4<Real const> const fx = w->fk[0].const_array(mfi);,
-                     Array4<Real const> const fy = w->fk[1].const_array(mfi);,
-                     Array4<Real const> const fz = w->fk[2].const_array(mfi);)
-        Array4<Real> const d = diag.array(mfi);
 
-        amrex::ParallelFor(bx,
-        [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        reduce_op.eval(bx, reduce_data,
+        [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
         {
-            const Real Te_c = cc(i,j,k,thd_diff::CTE);
-
-            Real stiff = 0.0_rt;
-            for (int idir = 0; idir < AMREX_SPACEDIM; ++idir) {
-                Real kl = 0.0_rt, kr = 0.0_rt;
-                if (idir == 0) { kl = fx(i,j,k); kr = fx(i+1,j,k); }
-#if AMREX_SPACEDIM >= 2
-                if (idir == 1) { kl = fy(i,j,k); kr = fy(i,j+1,k); }
-#endif
-#if AMREX_SPACEDIM == 3
-                if (idir == 2) { kl = fz(i,j,k); kr = fz(i,j,k+1); }
-#endif
-                stiff += thd_diff::cell_metric(i, j, k, idir,
-                                              problo.data(), dx.data(), coord)
-                         * (kl + kr);
-            }
-
-            const Real E    = amrex::max(s(i,j,k,UEINT), 1.0e-300_rt);
-            const Real Ee   = amrex::max(E - eh(i,j,k), 1.0e-300_rt);
-            const Real dTdE = Te_c / Ee;
-
-            Real dg = 1.0_rt + dt * stiff * dTdE;
-            if (!amrex::Math::isfinite(dg) || dg < 1.0_rt) { dg = 1.0_rt; }
-            d(i,j,k) = dg;
+            return { s(i,j,k,UEINT) - eh(i,j,k) };
         });
     }
+
+    Real emin = amrex::get<0>(reduce_data.value());
+    ParallelDescriptor::ReduceRealMin(emin);
+    return emin;
 }
 
-// One divide per cell, no EOS calls.
-inline void
-precond (const MultiFab& diag, const MultiFab& r, MultiFab& z)
-{
+
+// ====================================================================
+// The shifted Laplacian M, used as a preconditioner (MODE_IMPLICIT) or
+// as the linear solve itself (MODE_MG).
+//
+//   M w = alpha*w - dt*div( kappa grad w ),    alpha = E_e/Te = (dTe/dE)^-1
+//
+// and the direction in energy space is recovered as dE = alpha*w, since
+// w = s*dE with s = 1/alpha.
+//
+// Consistency check on the two preconditioners: the diagonal of M in
+// w-space is alpha + dt*stiff, so the diagonally-scaled version of this
+// preconditioner returns
+//
+//   alpha*r/(alpha + dt*stiff) = r/(1 + dt*stiff*(Te/E_e)),
+//
+// which is exactly the PC_JACOBI divisor below. PC_MG is the same
+// operator with the off-diagonal coupling retained, so it can only
+// change the iteration count, never the fixed point.
+//
+// dt -> 0 sanity check: M -> alpha, w = r/alpha, dE = alpha*w = r, i.e.
+// M^-1 -> I, matching J -> I.
+// ====================================================================
+
+struct Precond {
+
+    PrecondType type = PC_MG;
+    bool        defined = false;
+
+    // PC_JACOBI
+    MultiFab diag;
+
+    // PC_MG / MODE_MG
+    MultiFab alpha;                              // E_e/Te, cell-centred
+    MultiFab wsol;                               // solution, 1 ghost
+    MultiFab rhs;                                // right-hand side
+    std::unique_ptr<MLABecLaplacian> op;
+    std::unique_ptr<MLMG>            mlmg;
+    Geometry geom;
+    Real     dt_cur = 0.0_rt;
+    Params   par;
+
+    bool need_mg () const { return type == PC_MG; }
+
+    // ---------------------------------------------------------------
+    // Allocated once per solve. The MLABecLaplacian grid hierarchy is
+    // built here and reused across Newton iterations; only the
+    // coefficients change, via update() below.
+    void define (const BoxArray& ba, const DistributionMapping& dm,
+                 const Geometry& gm, const Params& p, bool mg_needed)
+    {
+        par    = p;
+        geom   = gm;
+        defined = true;
+
+        if (!mg_needed) {
+            diag.define(ba, dm, 1, 0);
+            return;
+        }
+
+        alpha.define(ba, dm, 1, 0);
+        wsol .define(ba, dm, 1, 1);
+        rhs  .define(ba, dm, 1, 0);
+
+        LPInfo info;
+        info.setAgglomeration(p.mg_agglomeration);
+        info.setConsolidation(p.mg_consolidation);
+        info.setMaxCoarseningLevel(p.mg_max_coarsening_lev);
+
+        op = std::make_unique<MLABecLaplacian>(Vector<Geometry>{gm},
+                                               Vector<BoxArray>{ba},
+                                               Vector<DistributionMapping>{dm},
+                                               info);
+
+        // Homogeneous Neumann matches the zero-gradient extrapolation in
+        // fill_ghosts (an adiabatic wall); periodic directions are taken
+        // from the Geometry so the two cannot disagree.
+        Array<LinOpBCType,AMREX_SPACEDIM> lobc, hibc;
+        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+            if (gm.isPeriodic(idim)) {
+                lobc[idim] = hibc[idim] = LinOpBCType::Periodic;
+            } else {
+                lobc[idim] = hibc[idim] = LinOpBCType::Neumann;
+            }
+        }
+        op->setDomainBC(lobc, hibc);
+
+        // nullptr = homogeneous. Both uses solve for an INCREMENT, whose
+        // boundary condition is homogeneous even when the state's is not.
+        op->setMaxOrder(2);
+        op->setLevelBC(0, nullptr);
+    }
+
+    // ---------------------------------------------------------------
+    // Rebuild the coefficients at the current Newton iterate. Called
+    // once per Newton iteration: the coefficients depend only on the
+    // iterate, so they are constant across a GMRES solve.
+    void update (const MultiFab& state, const MultiFab& Eh,
+                 Real dt, thd_diff::Workspace* ws)
+    {
+        dt_cur = dt;
+
+        thd_diff::compute_coeffs(state, ws->coef);
+        thd_diff::compute_face_coeffs(ws->coef, ws->fk, geom);
+
+        if (!need_mg()) { build_diag(state, Eh, dt, ws); return; }
+
+        // alpha = E_e/Te. Guarded the same way the Jacobi diagonal is:
+        // an imperfect coefficient costs iterations, not accuracy, but a
+        // non-finite one costs the whole solve.
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-    for (MFIter mfi(z, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
-        Array4<Real const> const d  = diag.const_array(mfi);
-        Array4<Real const> const rr = r.const_array(mfi);
-        Array4<Real>       const zz = z.array(mfi);
+        for (MFIter mfi(alpha, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.tilebox();
+            Array4<Real const> const s  = state.const_array(mfi);
+            Array4<Real const> const cc = ws->coef.const_array(mfi);
+            Array4<Real const> const eh = Eh.const_array(mfi);
+            Array4<Real>       const a  = alpha.array(mfi);
 
-        amrex::ParallelFor(bx,
-        [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-        {
-            zz(i,j,k) = rr(i,j,k) / d(i,j,k);
-        });
+            amrex::ParallelFor(bx,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                const Real E    = amrex::max(s(i,j,k,UEINT), 1.0e-300_rt);
+                const Real Ee   = amrex::max(E - eh(i,j,k), 1.0e-300_rt);
+                const Real Te_c = amrex::max(cc(i,j,k,thd_diff::CTE), 1.0e-300_rt);
+                Real av = Ee / Te_c;
+                if (!amrex::Math::isfinite(av) || av <= 0.0_rt) { av = 1.0e-300_rt; }
+                a(i,j,k) = av;
+            });
+        }
+
+        // A = 1, B = dt  ->  operator = alpha*w - dt*div(kappa grad w).
+        //
+        // setBCoeffs COPIES into the operator's own storage, which
+        // matters: ws->fk is scratch and compute_L overwrites it on
+        // every subsequent residual evaluation.
+        op->setScalars(1.0_rt, dt);
+        op->setACoeffs(0, alpha);
+        op->setBCoeffs(0, Array<MultiFab const*,AMREX_SPACEDIM>{
+                              AMREX_D_DECL(&ws->fk[0], &ws->fk[1], &ws->fk[2])});
+
+        // Rebuilt because MLMG caches per-coefficient state; the grid
+        // hierarchy inside `op` is NOT rebuilt, which is the expensive
+        // part.
+        mlmg = std::make_unique<MLMG>(*op);
+        mlmg->setVerbose(par.mg_verbose);
+        mlmg->setBottomVerbose(par.mg_bottom_verbose);
+        mlmg->setPreSmooth(par.mg_pre_smooth);
+        mlmg->setPostSmooth(par.mg_post_smooth);
+        if (par.mg_bottom_smoother) {
+            mlmg->setBottomSolver(MLMG::BottomSolver::smoother);
+        }
     }
-}
+
+    // ---------------------------------------------------------------
+    // x <- (approximately) M^-1 x, in energy space, in place.
+    //
+    // A FIXED number of V-cycles. Not a tolerance: GMRES needs the
+    // preconditioner to be a fixed linear operator, and a
+    // tolerance-controlled inner solve makes M^-1 depend on its own
+    // right-hand side.
+    void apply_inplace (MultiFab& x)
+    {
+        if (!need_mg()) {
+            MultiFab::Divide(x, diag, 0, 0, 1, 0);
+            return;
+        }
+
+        MultiFab::Copy(rhs, x, 0, 0, 1, 0);
+        wsol.setVal(0.0_rt);
+
+        mlmg->setFixedIter(par.mg_fixed_iter);
+        mlmg->solve(Vector<MultiFab*>{&wsol},
+                    Vector<MultiFab const*>{&rhs},
+                    0.0_rt, 0.0_rt);
+
+        MultiFab::Copy(x, wsol, 0, 0, 1, 0);
+        MultiFab::Multiply(x, alpha, 0, 0, 1, 0);   // dE = alpha*w
+    }
+
+    // ---------------------------------------------------------------
+    // MODE_MG: solve M dE = -F to a tolerance and return the direction
+    // directly. This is Newton with kappa' dropped, i.e. exactly the
+    // Picard/frozen-coefficient linearization
+    //
+    //   alpha*Te^{k+1} - dt*div(kappa grad Te^{k+1})
+    //       = E^n - E^k + alpha*Te^k,
+    //
+    // rearranged for the increment. No Krylov layer, no fd_eps.
+    //
+    // Returns the final MLMG residual norm.
+    Real newton_direction (const MultiFab& F, MultiFab& dE)
+    {
+        AMREX_ALWAYS_ASSERT(need_mg());
+
+        MultiFab::Copy(rhs, F, 0, 0, 1, 0);
+        rhs.mult(-1.0_rt);
+        wsol.setVal(0.0_rt);
+
+        mlmg->setFixedIter(0);          // tolerance-controlled
+        mlmg->setMaxIter(par.mg_max_iter);
+        const Real res = mlmg->solve(Vector<MultiFab*>{&wsol},
+                                     Vector<MultiFab const*>{&rhs},
+                                     par.mg_rtol, par.mg_atol);
+
+        MultiFab::Copy(dE, wsol, 0, 0, 1, 0);
+        MultiFab::Multiply(dE, alpha, 0, 0, 1, 0);
+        return res;
+    }
+
+private:
+
+    // The exact diagonal of the discretized Jacobian,
+    //
+    //   d = 1 + dt * sum_dir m_dir * (k_lo + k_hi) * dTe/dE,
+    //
+    // using the same face coefficients and cell metric as the operator,
+    // so the two cannot drift apart. dTe/dE = Te/E_e is exact for a
+    // gamma-law electron gas. It never enters the residual: an imperfect
+    // diagonal costs iterations, not accuracy.
+    void build_diag (const MultiFab& state, const MultiFab& Eh,
+                     Real dt, thd_diff::Workspace* ws)
+    {
+        // *Array() returns by value; geom.CellSize() would be a host
+        // pointer captured into a device lambda.
+        const amrex::GpuArray<Real,AMREX_SPACEDIM> problo = geom.ProbLoArray();
+        const amrex::GpuArray<Real,AMREX_SPACEDIM> dx     = geom.CellSizeArray();
+        const int coord = geom.Coord();
+
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+        for (MFIter mfi(diag, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.tilebox();
+            Array4<Real const> const s  = state.const_array(mfi);
+            Array4<Real const> const cc = ws->coef.const_array(mfi);
+            Array4<Real const> const eh = Eh.const_array(mfi);
+            AMREX_D_TERM(Array4<Real const> const fx = ws->fk[0].const_array(mfi);,
+                         Array4<Real const> const fy = ws->fk[1].const_array(mfi);,
+                         Array4<Real const> const fz = ws->fk[2].const_array(mfi);)
+            Array4<Real> const d = diag.array(mfi);
+
+            amrex::ParallelFor(bx,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                const Real Te_c = cc(i,j,k,thd_diff::CTE);
+
+                Real stiff = 0.0_rt;
+                for (int idir = 0; idir < AMREX_SPACEDIM; ++idir) {
+                    Real kl = 0.0_rt, kr = 0.0_rt;
+                    if (idir == 0) { kl = fx(i,j,k); kr = fx(i+1,j,k); }
+#if AMREX_SPACEDIM >= 2
+                    if (idir == 1) { kl = fy(i,j,k); kr = fy(i,j+1,k); }
+#endif
+#if AMREX_SPACEDIM == 3
+                    if (idir == 2) { kl = fz(i,j,k); kr = fz(i,j,k+1); }
+#endif
+                    stiff += thd_diff::cell_metric(i, j, k, idir,
+                                                   problo.data(), dx.data(), coord)
+                             * (kl + kr);
+                }
+
+                const Real E    = amrex::max(s(i,j,k,UEINT), 1.0e-300_rt);
+                const Real Ee   = amrex::max(E - eh(i,j,k), 1.0e-300_rt);
+                const Real dTdE = Te_c / Ee;
+
+                Real dg = 1.0_rt + dt * stiff * dTdE;
+                if (!amrex::Math::isfinite(dg) || dg < 1.0_rt) { dg = 1.0_rt; }
+                d(i,j,k) = dg;
+            });
+        }
+    }
+};
 
 
 // Left-preconditioned GMRES for J dE = -F.
 //
+// The matvec stays matrix-free, so the FULL Jacobian -- including the
+// non-symmetric dkappa/dTe term that cannot be expressed as an
+// MLABecLaplacian -- is applied. Only the preconditioner is
+// approximate.
+//
 // Modified Gram-Schmidt, with a second pass when orthogonalization
 // collapses the norm (deep Krylov spaces lose orthogonality, and the
-// Givens recurrence would still report convergence). 
+// Givens recurrence would still report convergence).
+//
+// The Hessenberg matrix is one flat vector, not a vector of rows: the
+// row-of-vectors form allocated m+1 separate blocks per call.
 inline int
 gmres (const MultiFab& state, const MultiFab& F0, const MultiFab& En,
-       const MultiFab& Eh, const MultiFab& diag, MultiFab& dE,
+       const MultiFab& Eh, Precond& pc, MultiFab& dE,
        const Geometry& geom, Real dt, const Params& p,
-       thd_diff::Workspace* ws = nullptr, Real* final_resid = nullptr)
+       thd_diff::Workspace* ws, MultiFab& pert, MultiFab& base,
+       MultiFab& w, Real* final_resid = nullptr)
 {
     const BoxArray&            ba = F0.boxArray();
     const DistributionMapping& dm = F0.DistributionMap();
 
     dE.setVal(0.0_rt);
 
-    // Allocated once per solve and reused by every jac_vec call.
-    MultiFab pert(state.boxArray(), state.DistributionMap(),
-                  state.nComp(), state.nGrow());
+    // pert tracks `state` except for UEINT/UFX, which apply_update
+    // rewrites each iteration; the full copy happens once here.
     MultiFab::Copy(pert, state, 0, 0, state.nComp(), state.nGrow());
-    MultiFab base(ba, dm, 1, 0);
     MultiFab::Copy(base, state, UEINT, 0, 1, 0);
 
-    MultiFab r(ba, dm, 1, 0);
-    MultiFab::Copy(r, F0, 0, 0, 1, 0);
-    r.mult(-1.0_rt);
-
+    // r0 = -F0, preconditioned in place.
     MultiFab z(ba, dm, 1, 0);
-    precond(diag, r, z);
+    MultiFab::Copy(z, F0, 0, 0, 1, 0);
+    z.mult(-1.0_rt);
+    pc.apply_inplace(z);
 
     const Real beta = z.norm2(0);
     if (final_resid != nullptr) { *final_resid = 0.0_rt; }
@@ -468,10 +770,18 @@ gmres (const MultiFab& state, const MultiFab& F0, const MultiFab& En,
 
     int m = p.max_gmres;
     if (m <= 0) {
-        const Box& dom = geom.Domain();
-        int nmax = dom.length(0);
-        for (int d = 1; d < AMREX_SPACEDIM; ++d) { nmax = amrex::max(nmax, dom.length(d)); }
-        m = amrex::max(amrex::min(2 * nmax, 400), 40);
+        // With PC_MG the count should be single digits and
+        // dx-independent, so the size is set by the ceiling alone; with
+        // PC_JACOBI it grows like dx^(-1/2) and the old grid-based sizing
+        // is kept.
+        if (pc.need_mg()) {
+            m = amrex::min(40, p.gmres_ceiling);
+        } else {
+            const Box& dom = geom.Domain();
+            int nmax = dom.length(0);
+            for (int d = 1; d < AMREX_SPACEDIM; ++d) { nmax = amrex::max(nmax, dom.length(d)); }
+            m = amrex::max(amrex::min(2 * nmax, p.gmres_ceiling), 40);
+        }
     }
 
     std::vector<std::unique_ptr<MultiFab>> V;
@@ -480,7 +790,11 @@ gmres (const MultiFab& state, const MultiFab& F0, const MultiFab& En,
     MultiFab::Copy(*V[0], z, 0, 0, 1, 0);
     V[0]->mult(1.0_rt / beta);
 
-    std::vector<std::vector<Real>> H(m + 1, std::vector<Real>(m, 0.0_rt));
+    // Flat Hessenberg, row stride m.
+    std::vector<Real> H(static_cast<std::size_t>(m + 1) * m, 0.0_rt);
+    auto Hat = [&H, m](int row, int col) -> Real& {
+        return H[static_cast<std::size_t>(row) * m + col];
+    };
     std::vector<Real> g(m + 1, 0.0_rt), cs(m, 0.0_rt), sn(m, 0.0_rt);
     g[0] = beta;
 
@@ -488,49 +802,58 @@ gmres (const MultiFab& state, const MultiFab& F0, const MultiFab& En,
     for (int k = 0; k < m; ++k) {
         kend = k + 1;
 
-        MultiFab w(ba, dm, 1, 0);
-        jac_vec(state, F0, *V[k], w, En, Eh, geom, dt, p, &pert, &base, ws);
+        // Matrix-free J*v ~= [F(E + eps*v) - F(E)] / eps, then
+        // preconditioned in place. Both norms must be the SAME norm;
+        // mixing L2 for the state with L-infinity for the direction
+        // inflates eps by ~sqrt(N).
+        {
+            const Real norm_E = state.norm2(UEINT);
+            const Real norm_v = V[k]->norm2(0);
+            const Real eps = p.fd_eps * (norm_E + 1.0_rt) / (norm_v + 1.0e-300_rt);
 
-        MultiFab wpc(ba, dm, 1, 0);
-        precond(diag, w, wpc);
-        MultiFab::Copy(w, wpc, 0, 0, 1, 0);
+            apply_update(pert, base, *V[k], eps, Eh, geom);
+            residual(pert, En, w, geom, dt, ws);   // w = F(E + eps*v)
+            MultiFab::Saxpy(w, -1.0_rt, F0, 0, 0, 1, 0);
+            w.mult(1.0_rt / eps);
+        }
+        pc.apply_inplace(w);
 
         const Real wnorm_before = w.norm2(0);
 
         for (int i = 0; i <= k; ++i) {
-            H[i][k] = MultiFab::Dot(w, 0, *V[i], 0, 1, 0);
-            MultiFab::Saxpy(w, -H[i][k], *V[i], 0, 0, 1, 0);
+            Hat(i,k) = MultiFab::Dot(w, 0, *V[i], 0, 1, 0);
+            MultiFab::Saxpy(w, -Hat(i,k), *V[i], 0, 0, 1, 0);
         }
-        H[k+1][k] = w.norm2(0);
+        Hat(k+1,k) = w.norm2(0);
 
-        if (p.reorth_tol > 0.0_rt && H[k+1][k] < p.reorth_tol * wnorm_before) {
+        if (p.reorth_tol > 0.0_rt && Hat(k+1,k) < p.reorth_tol * wnorm_before) {
             for (int i = 0; i <= k; ++i) {
                 const Real corr = MultiFab::Dot(w, 0, *V[i], 0, 1, 0);
-                H[i][k] += corr;
+                Hat(i,k) += corr;
                 MultiFab::Saxpy(w, -corr, *V[i], 0, 0, 1, 0);
             }
-            H[k+1][k] = w.norm2(0);
+            Hat(k+1,k) = w.norm2(0);
         }
 
-        const bool breakdown = !(H[k+1][k] > 1.0e-300_rt);
+        const bool breakdown = !(Hat(k+1,k) > 1.0e-300_rt);
 
         if (!breakdown && k + 1 < m) {
             V.push_back(std::make_unique<MultiFab>(ba, dm, 1, 0));
             MultiFab::Copy(*V[k+1], w, 0, 0, 1, 0);
-            V[k+1]->mult(1.0_rt / H[k+1][k]);
+            V[k+1]->mult(1.0_rt / Hat(k+1,k));
         }
 
         for (int i = 0; i < k; ++i) {
-            const Real t = cs[i]*H[i][k] + sn[i]*H[i+1][k];
-            H[i+1][k]    = -sn[i]*H[i][k] + cs[i]*H[i+1][k];
-            H[i][k]      = t;
+            const Real t = cs[i]*Hat(i,k) + sn[i]*Hat(i+1,k);
+            Hat(i+1,k)   = -sn[i]*Hat(i,k) + cs[i]*Hat(i+1,k);
+            Hat(i,k)     = t;
         }
-        Real den = std::sqrt(H[k][k]*H[k][k] + H[k+1][k]*H[k+1][k]);
+        Real den = std::sqrt(Hat(k,k)*Hat(k,k) + Hat(k+1,k)*Hat(k+1,k));
         if (den < 1.0e-300_rt) { den = 1.0e-300_rt; }
-        cs[k] = H[k][k]   / den;
-        sn[k] = H[k+1][k] / den;
-        H[k][k]   = cs[k]*H[k][k] + sn[k]*H[k+1][k];
-        H[k+1][k] = 0.0_rt;
+        cs[k] = Hat(k,k)   / den;
+        sn[k] = Hat(k+1,k) / den;
+        Hat(k,k)   = cs[k]*Hat(k,k) + sn[k]*Hat(k+1,k);
+        Hat(k+1,k) = 0.0_rt;
 
         const Real gt = cs[k]*g[k];
         g[k+1] = -sn[k]*g[k];
@@ -546,8 +869,8 @@ gmres (const MultiFab& state, const MultiFab& F0, const MultiFab& En,
     std::vector<Real> y(kend, 0.0_rt);
     for (int i = kend - 1; i >= 0; --i) {
         Real s = g[i];
-        for (int j = i + 1; j < kend; ++j) { s -= H[i][j] * y[j]; }
-        y[i] = (std::abs(H[i][i]) > 1.0e-300_rt) ? s / H[i][i] : 0.0_rt;
+        for (int j = i + 1; j < kend; ++j) { s -= Hat(i,j) * y[j]; }
+        y[i] = (std::abs(Hat(i,i)) > 1.0e-300_rt) ? s / Hat(i,i) : 0.0_rt;
     }
     for (int i = 0; i < kend; ++i) {
         MultiFab::Saxpy(dE, y[i], *V[i], 0, 0, 1, 0);
@@ -610,6 +933,8 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
         return true;
     }
 
+    const bool use_krylov = (p.mode == MODE_IMPLICIT);
+
     // ---- cache lookup -----------------------------------------------
     Real ck_sum = 0.0_rt, ck_lo = 0.0_rt, ck_hi = 0.0_rt;
     if (p.use_cache && time >= 0.0_rt) {
@@ -638,6 +963,15 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
     // Keeping them freezes the coarse-fine ghosts at their interpolated
     // values for the solve -- a Dirichlet condition from the coarse
     // level, lagged by a step but stable.
+    //
+    // NOTE: the MLMG operator below is single-level and takes
+    // HOMOGENEOUS conditions at the coarse-fine interface. As a
+    // preconditioner (MODE_IMPLICIT) that is only an iteration-count
+    // question, since the matrix-free residual still sees the real
+    // ghosts. In MODE_MG it also lags the interface flux, the same way
+    // the existing scheme does. Proper flux matching would need
+    // MLLinOp::setCoarseFineBC (or a composite multi-level solve), which
+    // is the natural next step here.
     const int nG = amrex::max(nGrow, 1);
     const int ncopy = amrex::min(nG, state_in.nGrow());
     MultiFab state(ba, dm, ncomp, nG);
@@ -680,13 +1014,29 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
     MultiFab En(ba, dm, 1, 0);
     MultiFab::Copy(En, state, UEINT, 0, 1, 0);
 
+    // Everything below is allocated ONCE per solve. Allocating inside
+    // the Newton or Krylov loops cost hundreds of MultiFab constructions
+    // per solve.
     MultiFab F(ba, dm, 1, 0), dE(ba, dm, 1, 0);
-    MultiFab base(ba, dm, 1, 0), diag(ba, dm, 1, 0);
+    MultiFab base(ba, dm, 1, 0);
+    MultiFab trial(ba, dm, ncomp, nG);              // line-search trial
+    MultiFab Ftrial(ba, dm, 1, 0);
 
-    // Cell coefficients + face conductivities, reused by every residual
-    // and preconditioner build in this solve.
+    // Only the Krylov path needs a perturbed state and a work vector.
+    MultiFab pert, w;
+    if (use_krylov) {
+        pert.define(ba, dm, ncomp, nG);
+        w   .define(ba, dm, 1, 0);
+    }
+
     thd_diff::Workspace wsp;
     wsp.define(ba, dm);
+
+    // MODE_MG needs the MG machinery whatever `precond` says; MODE_IMPLICIT
+    // needs it only when PC_MG is selected.
+    Precond pc;
+    pc.type = (p.mode == MODE_MG) ? PC_MG : p.precond;
+    pc.define(ba, dm, geom, p, pc.type == PC_MG);
 
     // Te bounds before the solve, for the maximum-principle check below.
     Real Te_lo_old = 0.0_rt, Te_hi_old = 0.0_rt;
@@ -727,23 +1077,29 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
 
     for (int it = 0; it < p.max_newton && !converged; ++it) {
 
-        build_precond(state, Eh, diag, geom, dt, &wsp);
-        Real kres = 0.0_rt;
-        const int nkr = gmres(state, F, En, Eh, diag, dE, geom, dt, p, &wsp, &kres);
+        pc.update(state, Eh, dt, &wsp);
 
-        // A silent inner failure returns a partial vector and Newton then
-        // follows a wrong direction with no indication.
-        if (kres > p.gmres_rtol) {
-            amrex::Print() << "[THD-JFNK] WARNING: GMRES stopped at " << nkr
-                           << " iterations, relative residual " << kres
-                           << " > " << p.gmres_rtol
-                           << ". Newton direction is inexact.\n";
+        int  nkr  = 0;
+        Real kres = 0.0_rt;
+
+        if (use_krylov) {
+            nkr = gmres(state, F, En, Eh, pc, dE, geom, dt, p,
+                        &wsp, pert, base, w, &kres);
+
+            // A silent inner failure returns a partial vector and Newton
+            // then follows a wrong direction with no indication.
+            if (kres > p.gmres_rtol) {
+                amrex::Print() << "[THD-JFNK] WARNING: GMRES stopped at " << nkr
+                               << " iterations, relative residual " << kres
+                               << " > " << p.gmres_rtol
+                               << ". Newton direction is inexact.\n";
+            }
+        } else {
+            // MODE_MG: the MLMG solve IS the linear solve.
+            kres = pc.newton_direction(F, dE);
         }
 
         MultiFab::Copy(base, state, UEINT, 0, 1, 0);
-
-        MultiFab trial(ba, dm, ncomp, nG);
-        MultiFab Ftrial(ba, dm, 1, 0);
 
         Real lambda = 1.0_rt;
         bool ok = false;
@@ -756,11 +1112,7 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
             // Electron conduction can only move electron energy, so
             // E > E_h. Enforcing it here bounds |dE| by the available
             // electron energy and keeps f in [0,1], with no artificial cap.
-            MultiFab Ee(ba, dm, 1, 0);
-            MultiFab::Copy(Ee, trial, UEINT, 0, 1, 0);
-            MultiFab::Subtract(Ee, Eh, 0, 0, 1, 0);
-
-            if (!(Ee.min(0) > 0.0_rt) || !(trial.min(UEINT, 0) > 0.0_rt)) {
+            if (!(min_electron_energy(trial, Eh) > 0.0_rt)) {
                 lambda *= 0.5_rt;
                 continue;
             }
@@ -775,6 +1127,12 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
         if (!ok) {
             // Committing a step known to increase the residual is how a
             // converging solve turns into a diverging one.
+            //
+            // MODE_MG hits this more readily than MODE_IMPLICIT: with
+            // kappa' dropped, the direction is only an approximate
+            // Newton direction, and near a steep front it can stop being
+            // a descent direction before the residual is at tolerance.
+            // If this fires often, switch to mode = implicit.
             if (p.verbose) {
                 amrex::Print() << "[THD-JFNK]   it=" << it
                                << "  line search failed, keeping previous iterate\n";
@@ -788,8 +1146,13 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
         converged = (Fnorm <= tol);
 
         if (p.verbose) {
-            amrex::Print() << "[THD-JFNK]   it=" << it << "  krylov=" << nkr
-                           << "  lambda=" << lambda << "  |F|=" << Fnorm
+            amrex::Print() << "[THD-JFNK]   it=" << it;
+            if (use_krylov) {
+                amrex::Print() << "  krylov=" << nkr << "  kres=" << kres;
+            } else {
+                amrex::Print() << "  mlmg_res=" << kres;
+            }
+            amrex::Print() << "  lambda=" << lambda << "  |F|=" << Fnorm
                            << (converged ? "  CONVERGED" : "") << "\n";
         }
     }
@@ -812,7 +1175,9 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
     constexpr Real aux_safety    = 0.4_rt;   // < 0.5: headroom for old/new combination
     const Real Ee_floor = 1.0e-10_rt * amrex::max(En.max(0), 1.0e-300_rt);
 
-    MultiFab dEmf(ba, dm, 1, 0), dFmf(ba, dm, 1, 0), ratio(ba, dm, 1, 0);
+    MultiFab& dEmf  = wsp.lap;       // reuse: L is no longer needed
+    MultiFab& dFmf  = wsp.scratch;
+    MultiFab  ratio(ba, dm, 1, 0);
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -884,34 +1249,7 @@ solve (const MultiFab& state_in, MultiFab& dsrc_e, MultiFab& dsrc_fx,
         amrex::Print() << "[THD-JFNK] Te [" << Te_lo_old << ", " << Te_hi_old
                        << "] -> [" << Te_lo_new << ", " << Te_hi_new << "]"
                        << (violated ? "  *** MAX-PRINCIPLE VIOLATED ***" : "  ok")
-                       << "\n";
-
-        // f outside [0,1] gives either negative Te or a Te the total
-        // energy cannot support, while total energy still balances --
-        // hard to spot without this.
-        MultiFab fpred(ba, dm, 1, 0);
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-        for (MFIter mfi(fpred, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.tilebox();
-            Array4<Real const> const sold = state_in.const_array(mfi);
-            Array4<Real const> const dfx  = dsrc_fx.const_array(mfi);
-            Array4<Real>       const fp   = fpred.array(mfi);
-            amrex::ParallelFor(bx,
-            [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-            {
-                const Real rho_c = sold(i,j,k,URHO);
-                fp(i,j,k) = (rho_c > 0.0_rt)
-                          ? (sold(i,j,k,UFX) + dt * dfx(i,j,k)) / rho_c
-                          : 0.5_rt;
-            });
-        }
-        const Real fmin = fpred.min(0);
-        const Real fmax = fpred.max(0);
-        amrex::Print() << "[THD-JFNK] f in [" << fmin << ", " << fmax << "]"
-                       << ((fmin < 0.0_rt || fmax > 1.0_rt)
-                               ? "  *** OUT OF RANGE ***" : "  ok") << "\n"
+                       << "\n"
                        << "[THD-JFNK] dsrc_e  " << dsrc_e.min(0)  << " / " << dsrc_e.max(0)
                        << "   dsrc_fx " << dsrc_fx.min(0) << " / " << dsrc_fx.max(0) << "\n";
     }
