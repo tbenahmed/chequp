@@ -81,7 +81,7 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         density_d.reset_dataset(dataset)
         density_d.store_chunk(density_data)
 
-    def write_plasma_profile(output_dir, z, r, density_H, density_He, density_Ar, density_N, density_e):
+    def write_plasma_profile(output_dir, z, r):
         """
         Create the target HDF5 file and write all calculated species density profiles to it.
 
@@ -102,6 +102,34 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         :param density_e: Transposed 2D array of calculated Electron density with shape ``(Nz, Nr)``.
         :type density_e: numpy.ndarray
         """
+        print('Loading CHEQUP...')
+        cs = CastroSimulation(input_path, 'plt_2d_*')
+        atomic_mass = 1.66e-30
+    
+        # Hydrogen
+        density_H_n = cs.get_field(t_hydro, quantity='rho_H0', level=0)['q'] / atomic_mass
+        density_H_ion = cs.get_field(t_hydro, quantity='rho_H1', level=0)['q'] / atomic_mass
+        # Helium
+        density_He_n = cs.get_field(t_hydro, quantity='rho_He0', level=0)['q'] / atomic_mass
+        density_He_ion = cs.get_field(t_hydro, quantity='rho_He1', level=0)['q'] / atomic_mass
+        density_He_ion += cs.get_field(t_hydro, quantity='rho_He2', level=0)['q'] / atomic_mass
+        # Argon
+        density_Ar0 = cs.get_field(t_hydro, quantity='rho_Ar0', level=0)['q'] / (39.9 * atomic_mass)
+        density_Ar_ion = cs.get_field(t_hydro, quantity='rho_Ar1', level=0)['q'] / (39.9 * atomic_mass)
+        for Z in range(2, 9):
+            density_Ar_ion += cs.get_field(t_hydro, quantity=f'rho_Ar{Z}', level=0)['q'] / (39.9 * atomic_mass)
+        # Nitrogen
+        density_N_n = cs.get_field(t_hydro, quantity='rho_N0', level=0)['q'] / (14.0 * atomic_mass)
+        density_N_ion = cs.get_field(t_hydro, quantity='rho_N1', level=0)['q'] / (14.0 * atomic_mass)
+        for Z in range(2, 6):
+            density_N)ion += cs.get_field(t_hydro, quantity=f'rho_N{Z}', level=0)['q'] / (14.0 * atomic_mass)
+    
+        density_e = density_H_ion + density_Ar_ion * 8.0 + 5.0 * density_N_ion + 2 * density_He_ion
+        # Geometry
+        r_max, z_max = get_domain_extents(f"{input_path}/plt_2d_00000/Header")
+        r = np.linspace(0, r_max*1e-2, density_e.shape[0])
+        z = np.linspace(0, z_max*1e-2, density_e.shape[0])
+    
         file_path = os.path.join(output_dir, "plasma_density.h5")
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -112,10 +140,14 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
 
         # Assuming density_H was originally created as (Nr, Nz). 
         # Transposing it with .T makes it (Nz, Nr), which perfectly aligns with our (z, r) inputs.
-        store_species_in_file_rz(z, r, series, density_H, "density_H")
-        store_species_in_file_rz(z, r, series, density_He, "density_He")
-        store_species_in_file_rz(z, r, series, density_Ar, "density_Ar")
-        store_species_in_file_rz(z, r, series, density_N, "density_N")
+        store_species_in_file_rz(z, r, series, density_H_n, "density_H_n")
+        store_species_in_file_rz(z, r, series, density_H_ion, "density_H_ion")
+        store_species_in_file_rz(z, r, series, density_He_n, "density_He_n")
+        store_species_in_file_rz(z, r, series, density_He_ion, "density_He_ion")
+        store_species_in_file_rz(z, r, series, density_Ar_n, "density_Ar_n")
+        store_species_in_file_rz(z, r, series, density_Ar_ion, "density_Ar_ion")
+        store_species_in_file_rz(z, r, series, density_N_n, "density_N_n")
+        store_species_in_file_rz(z, r, series, density_N_ion, "density_N_ion")
         store_species_in_file_rz(z, r, series, density_e, "density_e")
 
         # Flush and safely close
@@ -138,38 +170,10 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         r_max, z_max = map(float, lines[prob_hi_idx].split())
         return r_max, z_max
 
-    print('Loading CHEQUP...')
-    cs = CastroSimulation(input_path, 'plt_2d_*')
-    atomic_mass = 1.66e-30
 
-    # Hydrogen
-    density_H = cs.get_field(t_hydro, quantity='rho_H1', level=0)['q'] / atomic_mass
-    # Helium
-    density_He = cs.get_field(t_hydro, quantity='rho_He1', level=0)['q'] / atomic_mass
-    density_He += cs.get_field(t_hydro, quantity='rho_He2', level=0)['q'] / atomic_mass
-    # Argon
-    density_Ar = cs.get_field(t_hydro, quantity='rho_Ar1', level=0)['q'] / (39.9 * atomic_mass)
-    for Z in range(2, 9):
-        density_Ar += cs.get_field(t_hydro, quantity=f'rho_Ar{Z}', level=0)['q'] / (39.9 * atomic_mass)
-    # Nitrogen
-    density_N = cs.get_field(t_hydro, quantity='rho_N1', level=0)['q'] / (14.0 * atomic_mass)
-    for Z in range(2, 6):
-        density_N += cs.get_field(t_hydro, quantity=f'rho_N{Z}', level=0)['q'] / (14.0 * atomic_mass)
-
-    density_e = density_H + density_Ar * 8.0 + 5.0 * density_N + 2 * density_He
-    # Geometry
-    r_max, z_max = get_domain_extents(f"{input_path}/plt_2d_00000/Header")
-    r = np.linspace(0, r_max*1e-2, density_e.shape[0])
-    z = np.linspace(0, z_max*1e-2, density_e.shape[0])
-    
     write_plasma_profile(
             output_dir=output_path,
             z=z,
-            r=r,
-            density_H=density_H.T,
-            density_He=density_He.T,
-            density_Ar=density_Ar.T,
-            density_N=density_N.T,
-            density_e=density_e.T
+            r=r
         )
     print(f'Wrote {output_path}/plasma_density.h5')
