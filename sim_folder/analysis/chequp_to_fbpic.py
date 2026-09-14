@@ -81,7 +81,7 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         density_d.reset_dataset(dataset)
         density_d.store_chunk(density_data)
 
-    def write_plasma_profile(output_dir, z, r):
+    def write_plasma_profile(output_dir):
         """
         Create the target HDF5 file and write all calculated species density profiles to it.
 
@@ -114,7 +114,7 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         density_He_ion = cs.get_field(t_hydro, quantity='rho_He1', level=0)['q'] / atomic_mass
         density_He_ion += cs.get_field(t_hydro, quantity='rho_He2', level=0)['q'] / atomic_mass
         # Argon
-        density_Ar0 = cs.get_field(t_hydro, quantity='rho_Ar0', level=0)['q'] / (39.9 * atomic_mass)
+        density_Ar_n = cs.get_field(t_hydro, quantity='rho_Ar0', level=0)['q'] / (39.9 * atomic_mass)
         density_Ar_ion = cs.get_field(t_hydro, quantity='rho_Ar1', level=0)['q'] / (39.9 * atomic_mass)
         for Z in range(2, 9):
             density_Ar_ion += cs.get_field(t_hydro, quantity=f'rho_Ar{Z}', level=0)['q'] / (39.9 * atomic_mass)
@@ -122,7 +122,7 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         density_N_n = cs.get_field(t_hydro, quantity='rho_N0', level=0)['q'] / (14.0 * atomic_mass)
         density_N_ion = cs.get_field(t_hydro, quantity='rho_N1', level=0)['q'] / (14.0 * atomic_mass)
         for Z in range(2, 6):
-            density_N)ion += cs.get_field(t_hydro, quantity=f'rho_N{Z}', level=0)['q'] / (14.0 * atomic_mass)
+            density_N_ion += cs.get_field(t_hydro, quantity=f'rho_N{Z}', level=0)['q'] / (14.0 * atomic_mass)
     
         density_e = density_H_ion + density_Ar_ion * 8.0 + 5.0 * density_N_ion + 2 * density_He_ion
         # Geometry
@@ -171,9 +171,5 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         return r_max, z_max
 
 
-    write_plasma_profile(
-            output_dir=output_path,
-            z=z,
-            r=r
-        )
+    write_plasma_profile(output_dir=output_path)
     print(f'Wrote {output_path}/plasma_density.h5')
