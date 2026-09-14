@@ -110,9 +110,9 @@ def write_FBPIC_profile(input_path='.', output_path='.', t_hydro=0.0e-9):
         density_H_n = cs.get_field(t_hydro, quantity='rho_H0', level=0)['q'] / atomic_mass
         density_H_ion = cs.get_field(t_hydro, quantity='rho_H1', level=0)['q'] / atomic_mass
         # Helium
-        density_He_n = cs.get_field(t_hydro, quantity='rho_He0', level=0)['q'] / atomic_mass
-        density_He_ion = cs.get_field(t_hydro, quantity='rho_He1', level=0)['q'] / atomic_mass
-        density_He_ion += cs.get_field(t_hydro, quantity='rho_He2', level=0)['q'] / atomic_mass
+        density_He_n = cs.get_field(t_hydro, quantity='rho_He0', level=0)['q'] / (4.00 * atomic_mass)
+        density_He_ion = cs.get_field(t_hydro, quantity='rho_He1', level=0)['q'] / (4.00 * atomic_mass)
+        density_He_ion += cs.get_field(t_hydro, quantity='rho_He2', level=0)['q'] / (4.00 * atomic_mass)
         # Argon
         density_Ar_n = cs.get_field(t_hydro, quantity='rho_Ar0', level=0)['q'] / (39.9 * atomic_mass)
         density_Ar_ion = cs.get_field(t_hydro, quantity='rho_Ar1', level=0)['q'] / (39.9 * atomic_mass)
