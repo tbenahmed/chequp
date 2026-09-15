@@ -1,10 +1,18 @@
 """
 chequp_to_fbpic.py
-================
+==================
 
 This module handles the extraction and processing of plasma density profiles from 
 CHEQUP hydrodynamics simulations and exports them into an openPMD 
 HDF5 format compatible with FBPIC (in 2D cylindrical :math:`r-z` geometry).
+
+Typical usage::
+
+    from chequp_to_fbpic import write_FBPIC_profile
+
+    fbpic_input = write_FBPIC_profile(input_path='./path_to_CHEQUP_sim', 
+                                    output_path='./path_to_fbpic_input', 
+                                    t_hydro=3.5e-9)
 """
 
 import os
