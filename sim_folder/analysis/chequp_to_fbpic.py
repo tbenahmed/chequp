@@ -18,11 +18,7 @@ Typical usage::
 import os
 import sys
 import numpy as np
-from scipy.ndimage import gaussian_filter
 import openpmd_api as io
-
-code_path = '/data/dust/user/benahmed/src/Codes/chequp'
-sys.path.append(f"{code_path}/sim_folder/analysis")
 from analysis_tool import CastroSimulation
 
 
