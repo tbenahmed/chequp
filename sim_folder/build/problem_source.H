@@ -101,20 +101,12 @@ void problem_source (int i, int j, int k,
             // Net Rate Coefficient
             Real const coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
             // Update Mass Fraction Sources
-            amrex::Real source_avail = amrex::max(0.0, src(i,j,k, UFS + beta));
-            amrex::Real dest_space   = amrex::max(0.0, 1.0 - src(i,j,k, UFS + beta_next));
-            // prevent negative propagation
-            amrex::Real safe_coeff = amrex::max(0.0, coeff);
-            amrex::Real actual_coeff = amrex::min(safe_coeff, amrex::min(source_avail, dest_space));
-
-            // Mass fraction X[beta] is now guaranteed to be in [0, 1]
-            src(i,j,k, UFS + beta)      -= actual_coeff;
-            src(i,j,k, UFS + beta_next) += actual_coeff;
-
+            src(i,j,k,UFS+beta)      -= coeff;
+            src(i,j,k,UFS+beta_next) += coeff;
             // Energy Update
             int idx_Eion = get_energy_index(zatom[atom_idx]) + zion[beta];
             Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
-            e_ion -= actual_coeff * (E_ion_erg / (aion[beta] * C::m_p));
+            e_ion -= coeff * (E_ion_erg / (aion[beta] * C::m_p));
         }
     }
 
