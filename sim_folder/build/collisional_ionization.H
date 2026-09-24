@@ -268,9 +268,10 @@ namespace coll_ion
         const Real n_e_safe = amrex::max(n_e * 1e-6_rt, 1.e-30_rt);
         // Wigner-Seitz radius and the associated Coulomb temperature
         const Real a_d = std::cbrt(3.0_rt / (4.0_rt * M_PI * n_e_safe));
-        const Real T_coulomb = (q_elem_cgs * q_elem_cgs / a_d);
+        const Real T_coulomb = (q_elem_cgs * q_elem_cgs / a_d) / (C::k_B);
         // Regularized evaluation temperature including Coulomb temperature
-        return std::sqrt(Te * Te / (C::k_B * C::k_B) + T_coulomb * T_coulomb);
+        const Real T_eff = std::sqrt(Te * Te + T_coulomb * T_coulomb);
+        return T_eff;
     }
 
     // Accesses the 3-body recombination rate for a given atomic number and
@@ -280,8 +281,7 @@ namespace coll_ion
     {
         // Regularized evaluation temperature including Coulomb temperature
         Real Te_eff = get_effective_temperature(Te, n_e);
-        const Real Te_eff_eV = Te_eff * K_to_eV;
-
+        std::cout << "Te_eff: " << Te_eff << std::endl;
         const Real rate_dir = get_rate_direct_ion(ispe, Te_eff);
         const Real rate_ex  = get_rate_ex_ion(ispe, Te_eff);
 
@@ -304,11 +304,11 @@ namespace coll_ion
         // If rate_dir is valid (> 0), take its natural log; otherwise use a tiny number to prevent -infinity
         const Real log_rate_dir = (rate_dir > 0.0_rt) ? std::log(rate_dir) : ln_tiny;
         // Add the energy contribution (energy divided by electron temperature)
-        const Real a = log_rate_dir + ionization_energy[idx_Eion] / Te_eff_eV;
+        const Real a = log_rate_dir + ionization_energy[idx_Eion] / (Te_eff / C::k_B);
 
         // Same process for the excitation channel
         const Real log_rate_ex = (rate_ex > 0.0_rt) ? std::log(rate_ex) : ln_tiny;
-        const Real b = log_rate_ex + ex_energy_atom[idx_atom] / Te_eff_eV;
+        const Real b = log_rate_ex + ex_energy_atom[idx_atom] / (Te_eff / C::k_B);
 
         // Combine the two channels using the "log-sum-exp" trick
         // This is a numerically stable way to compute log(e^a + e^b) without overflow
