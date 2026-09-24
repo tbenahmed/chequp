@@ -281,7 +281,6 @@ namespace coll_ion
     {
         // Regularized evaluation temperature including Coulomb temperature
         Real Te_eff = get_effective_temperature(Te, n_e);
-        std::cout << "Te_eff: " << Te_eff << std::endl;
         const Real rate_dir = get_rate_direct_ion(ispe, Te_eff);
         const Real rate_ex  = get_rate_ex_ion(ispe, Te_eff);
 
