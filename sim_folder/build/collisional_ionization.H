@@ -268,10 +268,9 @@ namespace coll_ion
         const Real n_e_safe = amrex::max(n_e * 1e-6_rt, 1.e-30_rt);
         // Wigner-Seitz radius and the associated Coulomb temperature
         const Real a_d = std::cbrt(3.0_rt / (4.0_rt * M_PI * n_e_safe));
-        const Real T_coulomb = (q_elem_cgs * q_elem_cgs / a_d) / (C::k_B);
+        const Real T_coulomb = (q_elem_cgs * q_elem_cgs / a_d) / C::k_B;
         // Regularized evaluation temperature including Coulomb temperature
-        const Real T_eff = std::sqrt(Te * Te + T_coulomb * T_coulomb);
-        return T_eff;
+        return std::sqrt(Te * Te + T_coulomb * T_coulomb);
     }
 
     // Accesses the 3-body recombination rate for a given atomic number and
