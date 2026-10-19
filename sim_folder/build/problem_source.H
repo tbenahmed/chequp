@@ -89,7 +89,7 @@ void problem_source (int i, int j, int k,
     Real e_ion = 0.0;
 
     const Real rho_scale = (rho * rho) / C::m_p;
-    const Real dt_inv    = has_dt ? (0.99_rt * rho / dt) : 0.0_rt;
+    const Real dt_inv    = (0.99_rt * rho / dt);
 
     for (int ispe = 0; ispe < n_active; ++ispe) {
         const int beta      = active_spec[ispe];
