@@ -2,3 +2,4 @@ __pycache__/
 *.npz
 results_sod.json
 log_*.txt
+blog_*.txt

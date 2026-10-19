@@ -26,6 +26,7 @@ import numpy as np
 from numba import njit
 from math import exp, sqrt, log
 from ugkwp import Species, prim, valid, match_moments, cell_sort, locate
+import chequp_rates as cr
 
 KB = 1.380649e-23
 QE = 1.602176634e-19
@@ -112,12 +113,26 @@ def _select(px, n, xf, P):
 class HOFIChannel:
     def __init__(self, R=100e-6, ncell=200, n0=1e23, r0=12e-6, Te0_eV=5.0,
                  T0=300.0, floor=1e-4, nc=100, full_particle=False, seed=1,
-                 sigma_cx=5e-19, d_HH=2.5e-10, omega_HH=0.7, fluid=False):
+                 sigma_cx=5e-19, d_HH=2.5e-10, omega_HH=0.7, fluid=False,
+                 profile=None, electrons='simple'):
+        """profile: optional callable r[m] -> (n_e [m^-3], T_e [K]) giving the
+        initial ionized fraction n_e/n0 and electron temperature (otherwise the
+        super-Gaussian of radius r0 and peak Te0_eV).
+        electrons: 'simple' (Voronov ionization, NRL e-i exchange, no
+        conduction) or 'chequp' (CHEQUP rates: ionization + 3-body
+        recombination, e-i and e-n exchange, implicit electron conduction)."""
         self.xf = np.linspace(0, R, ncell + 1)
         xc = 0.5 * (self.xf[1:] + self.xf[:-1])
-        f = np.exp(-(xc / r0) ** 4)
+        if profile is None:
+            f = np.exp(-(xc / r0) ** 4)
+            Te_init = T0 + (Te0_eV * 11604.518 - T0) * f
+        else:
+            ne0, Te_init = profile(xc)
+            f = np.clip(ne0 / n0, 0, 1)
+            Te_init = np.maximum(Te_init, T0)
         ni = np.maximum(n0 * f, floor * n0)
         nn = np.maximum(n0 * (1 - f), floor * n0)
+        self.electrons = electrons
         RT0 = KB * T0 / MH
 
         def W_of(n):
@@ -138,7 +153,7 @@ class HOFIChannel:
                            rho_wave_only=rwo, RT_floor=RT0)
         self.neu = Species(self.xf, 1, W_of(nn), tp_n, nc=nc, seed=seed + 1000, full_particle=full_particle,
                            rho_wave_only=rwo, RT_floor=RT0)
-        self.Te_arr = T0 + (Te0_eV * 11604.518 - T0) * f   # electron temperature [K]
+        self.Te_arr = Te_init.copy()                        # electron temperature [K]
         self.T0 = T0
         self.sigma_cx = sigma_cx
         self.full = full_particle
@@ -198,12 +213,22 @@ class HOFIChannel:
         self._electrons(dt, 0.5 * (U_old + U_new))
         # 3) ambipolar force on the ions
         self._ambipolar(dt)
-        # 4) electron-ion energy exchange
-        self._ei_exchange(dt)
-        # 5) charge exchange
-        self._charge_exchange(dt)
-        # 6) electron-impact ionization
-        self._ionization(dt)
+        if self.electrons == 'chequp':
+            # 4) electron heat conduction (implicit)
+            self._conduction(dt)
+            # 5) electron-ion and electron-neutral energy exchange
+            self._e_heavy_exchange(dt)
+            # 6) charge exchange
+            self._charge_exchange(dt)
+            # 7) ionization and 3-body recombination
+            self._ioniz_recomb(dt)
+        else:
+            # 4) electron-ion energy exchange
+            self._ei_exchange(dt)
+            # 5) charge exchange
+            self._charge_exchange(dt)
+            # 6) electron-impact ionization
+            self._ionization(dt)
         self.t += dt
         self.nsteps += 1
 
@@ -338,6 +363,105 @@ class HOFIChannel:
         ne_new = ne + dn
         self.Te_arr = np.where(ne_new > 0, eps / (1.5 * np.where(ne_new > 0, ne_new, 1) * KB), self.T0)
         self.Te_arr = np.clip(self.Te_arr, self.T0, TE_MAX)
+        if self.full:
+            for sp in (ion, neu):
+                sp.W = sp.Wp()
+                sp.Wh[:] = 0.0
+        else:
+            self._sync(ion)
+            self._sync(neu)
+
+
+    # ------------------------------------------------------------------
+    # CHEQUP electron physics
+    # ------------------------------------------------------------------
+    def _conduction(self, dt):
+        """Implicit (backward Euler) electron heat conduction with the CHEQUP
+        conductivity, cylindrical finite volume, harmonic face averages."""
+        from scipy.linalg import solve_banded
+        ne = self.ne()
+        nn = self._mom(self.neu)[0] / MH
+        Ti = np.maximum(self._mom(self.ion)[2] * MH / KB, self.T0)
+        T = self.Te_arr
+        kap = cr.conductivity(ne, nn, T, Ti, MH)
+        dr = self.xf[1] - self.xf[0]
+        with np.errstate(all='ignore'):
+            kf = np.where((kap[1:] > 0) & (kap[:-1] > 0), 2 * kap[1:] * kap[:-1] / (kap[1:] + kap[:-1]), 0.0)
+        G = np.zeros(len(self.xf))
+        G[1:-1] = self.A[1:-1] * kf / dr               # face conductance (per radian)
+        C = np.maximum(1.5 * ne * KB * self.V, 1e-300) / dt
+        n = len(T)
+        ab = np.zeros((3, n))
+        ab[1] = C + G[:-1] + G[1:]
+        ab[0, 1:] = -G[1:-1]
+        ab[2, :-1] = -G[1:-1]
+        Tn = solve_banded((1, 1), ab, C * T)
+        self.Te_arr = np.clip(Tn, self.T0, TE_MAX)
+
+    def _e_heavy_exchange(self, dt):
+        """e-i and e-n elastic energy exchange, rates 2 m_e/m nu (CHEQUP)."""
+        ne = self.ne()
+        ri, Ui, RTi = self._mom(self.ion)
+        rn, Un, RTn = self._mom(self.neu)
+        Ti = np.where(ri > 0, RTi * MH / KB, self.T0)
+        Tn = np.where(rn > 0, RTn * MH / KB, self.T0)
+        Te = self.Te_arr
+        nu_ei, nu_en = cr.collision_frequencies(ne, rn / MH, Te, np.maximum(Ti, self.T0), MH)
+        # electrons <-> ions (equal heat capacities, n_e = n_i)
+        x = (Te - Ti) * (1 - np.exp(-2 * (2 * ME / MH) * nu_ei * dt)) / 2
+        x = np.where(ri > 0, x, 0.0)
+        dEi = 1.5 * ne * KB * x
+        Te = Te - x
+        # electrons -> neutrals (neutral heat capacity n_n >= n_e: implicit in Te only)
+        a = 2 * ME / MH * nu_en * dt
+        nn = rn / MH
+        cap = np.where(nn > 0, ne / np.where(nn > 0, nn, 1), 0.0)
+        Teq = (cap * Te + Tn) / (1 + cap)          # (n_e Te + n_n Tn) / (n_e + n_n)
+        y = np.where(rn > 0, (Te - Teq) * (1 - np.exp(-a * (1 + cap))), 0.0)
+        dEn = 1.5 * ne * KB * y
+        self.Te_arr = np.clip(Te - y, self.T0, TE_MAX)
+        self._add_heat(self.ion, dEi)
+        self._add_heat(self.neu, dEn)
+
+    def _transfer(self, src, dst, P):
+        """move a fraction P (per cell) of species src to dst: particles keep
+        their velocity, the wave part moves its moments. Returns moved number
+        density per cell."""
+        sel = _select(src.px, src.np, src.xf, P)
+        moved = np.zeros(len(P))
+        if sel.any():
+            idx = np.nonzero(sel)[0]
+            cells = np.minimum(((src.px[idx] - self.xf[0]) / (self.xf[1] - self.xf[0])).astype(int), src.n - 1)
+            np.add.at(moved, cells, src.pw[idx])
+            dst._append(src.px[idx], src.pvx[idx], src.pvy[idx], src.pvz[idx], src.pw[idx])
+            src._compact(~sel)
+        okh = valid(src.Wh)
+        dWh = np.where(okh[:, None], P[:, None] * src.Wh, 0.0)
+        src.Wh = src.Wh - dWh
+        dst.Wh = np.where(valid(dst.Wh)[:, None], dst.Wh, 0.0) + dWh
+        return (moved / self.V + dWh[:, 0]) / MH
+
+    def _ioniz_recomb(self, dt):
+        ion, neu = self.ion, self.neu
+        ne = self.ne()
+        Te = self.Te_arr
+        S = cr.rate_direct(Te) + cr.rate_ex(Te)
+        K3 = cr.rate_3body(Te, ne)
+        P_ion = 1 - np.exp(-ne * S * dt)
+        P_rec = 1 - np.exp(-ne * ne * K3 * dt)
+        nn = self._mom(neu)[0] / MH
+        ni = ne
+        self._transfer(ion, neu, P_rec)
+        self._transfer(neu, ion, P_ion)
+        # electron temperature from the expected per-electron rates (robust in
+        # near-empty cells where one particle may carry more charge than the
+        # cell): ionization costs chi + the newcomer's share of thermal energy,
+        # recombination returns chi to the remaining electrons
+        with np.errstate(all='ignore'):
+            ion_per_e = np.where(ne > 0, nn * P_ion / np.where(ne > 0, ne, 1), 0.0)
+        rec_per_e = np.where(ni > 0, P_rec, 0.0)
+        Tn = Te + (-(EION + 1.5 * KB * Te) * ion_per_e + EION * rec_per_e) / (1.5 * KB)
+        self.Te_arr = np.clip(Tn, self.T0, TE_MAX)
         if self.full:
             for sp in (ion, neu):
                 sp.W = sp.Wp()
