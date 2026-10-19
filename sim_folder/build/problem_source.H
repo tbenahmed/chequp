@@ -44,7 +44,6 @@ void problem_source (int i, int j, int k,
             if (mu > 0 && get_atom_index(mu) == get_atom_index(mu-1)) active_mask[mu-1] = true;
             if (mu < NumSpec-1 && get_atom_index(mu) == get_atom_index(mu+1)) active_mask[mu+1] = true;
         }
-    }
 
         // Build list of active species indices
         if (active_mask[mu]) {
