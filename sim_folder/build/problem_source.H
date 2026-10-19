@@ -125,7 +125,7 @@ void problem_source (int i, int j, int k,
         src(i, j, k, UFS + beta)      -= net_rate;
         src(i, j, k, UFS + beta_next) += net_rate;
 
-        // 4. Energy Update
+        // Energy Update
         const int  idx_Eion  = get_energy_index(zatom[atom_idx]) + zion[beta];
         const Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
 
