@@ -99,7 +99,7 @@ void problem_source (int i, int j, int k,
             Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
             Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
             // Convert to volumetric mass production rates (g / cm^3 / s)
-            Real ion_rate = (coll_I_d + coll_I_e) * (rho * rho / C::m_p) * aion_inv[beta];
+            Real ion_rate = (coll_I_d + coll_I_e) * (rho * rho / C::m_p);
             Real rec_rate = three_body * (rho * rho / C::m_p);
             // Ensure it don't ionize or drain more than available
             Real max_ion_rate = (dt > 0.0_rt) ? 0.99_rt * (X_stage[beta] * rho / dt) : 0.0_rt;
