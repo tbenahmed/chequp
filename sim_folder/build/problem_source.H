@@ -121,7 +121,7 @@ void problem_source (int i, int j, int k,
 
         const Real net_rate = ion_rate - rec_rate;
 
-        // 3. Update Mass Fraction Sources
+        // Update Mass Fraction Sources
         src(i, j, k, UFS + beta)      -= net_rate;
         src(i, j, k, UFS + beta_next) += net_rate;
 
