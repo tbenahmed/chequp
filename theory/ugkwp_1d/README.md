@@ -111,6 +111,27 @@ r in [0, 120] um, 0.5 um cells.
 * The fall of n_e on axis (1e24 -> 2e23 m^-3 by 1 ns) is expansion, not
   recombination: the number of electrons per unit length changes by <0.3%.
 
+### Full run to 4 ns, r <= 50 um (`bench_1e24_profiles.png`, `bench_1e24_rt.png`)
+
+Outputs every 0.1 ns (`run_bench.py`, `plot_bench_time.py`; smooth PCHIP
+initial profile as above). At 4 ns:
+
+| | n_H0 peak | n_e (r < 5 um) | ion front (n_e > 1e22) | T_n (r < 10 um) | Pi_rr/p of H (35-50 um) |
+|---|---|---|---|---|---|
+| kinetic reference | 1.28e24 at 34 um | 1.24e23 | 34.8 um | 0.081 eV | 0.67 |
+| UGKWP | 1.36e24 at 33 um | 1.16e23 | 35.2 um | 0.097 eV | 0.26 |
+| two-fluid Euler | **2.33e24** at 33 um | **6.8e22** | 34.8 um | **0.21 eV** | 0 |
+
+* The fluid neutral shock keeps steepening (n_H0 spike 1.8x the kinetic
+  value), the fluid core is too hot (T_n 2.6x) and the on-axis plasma density
+  is 45% too low; the front position itself is right.
+* UGKWP tracks densities and temperatures, but **under-predicts the neutral
+  pressure anisotropy behind the front by 35-60% from ~1.5 ns on** (not a
+  time-step effect: dt / 4 gives the same value). Open issue.
+* UGKWP shows a spurious neutral density in the first ~1 um cell on axis at
+  late times (tiny cell volume); the particle reference leaks ~5e-4 of the
+  mass by 4 ns.
+
 ### Issue found in CHEQUP's rates
 
 `collisional_ionization.H` interpolates the direct ionization rate

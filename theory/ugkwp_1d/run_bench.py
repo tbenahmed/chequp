@@ -9,9 +9,9 @@ import sys
 import time
 import numpy as np
 from hofi import HOFIChannel, MH
-from benchmark_1e24 import profile, N0, T_HEAVY
+from benchmark_1e24 import profile_pchip as profile, N0, T_HEAVY
 
-SNAP = [0.0, 0.5e-9, 1.0e-9, 2.0e-9]
+SNAP = list(np.round(np.arange(0, 4.0001e-9, 0.1e-9), 13))
 
 
 def tau_min_ions(ch):
