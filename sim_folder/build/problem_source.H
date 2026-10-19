@@ -27,7 +27,6 @@ void problem_source (int i, int j, int k,
 
     // Initialize species mass fractions and identify active species
     Real X_stage[NumSpec];
-
     // Create mask to identify active species
     bool active_mask[NumSpec] = {false};
     int active_spec[NumSpec];
