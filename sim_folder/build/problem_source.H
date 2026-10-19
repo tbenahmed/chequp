@@ -88,33 +88,48 @@ void problem_source (int i, int j, int k,
     // Initialize sources
     Real e_ion = 0.0;
 
-    for (int ispe = 0; ispe < n_active; ispe++) {
-        int beta = active_spec[ispe];
-        int beta_next = beta + 1;
-        int atom_idx = get_atom_index(beta);
+    const Real rho_scale = (rho * rho) / C::m_p;
+    const Real dt_inv    = has_dt ? (0.99_rt * rho / dt) : 0.0_rt;
 
-        if (beta_next < NumSpec && get_atom_index(beta_next) == atom_idx && zion[beta] < zatom[atom_idx]) {
-            // Calculate Rates
-            Real coll_I_d = X_stage[beta] * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
-            Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
-            Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
-            // Convert to volumetric mass production rates (g / cm^3 / s)
-            Real ion_rate = (coll_I_d + coll_I_e) * (rho * rho / C::m_p);
-            Real rec_rate = three_body * (rho * rho / C::m_p);
-            // Ensure it don't ionize or drain more than available
-            Real max_ion_rate = (dt > 0.0_rt) ? 0.99_rt * (X_stage[beta] * rho / dt) : 0.0_rt;
-            Real max_rec_rate = (dt > 0.0_rt) ? 0.99_rt * (X_stage[beta_next] * rho / dt) : 0.0_rt;
-            ion_rate = amrex::min(ion_rate, max_ion_rate);
-            rec_rate = amrex::min(rec_rate, max_rec_rate);
-            Real const coeff = ion_rate - rec_rate;
-            // Update Mass Fraction Sources
-            src(i,j,k,UFS+beta)      -= coeff;
-            src(i,j,k,UFS+beta_next) += coeff;
-            // Energy Update
-            int idx_Eion = get_energy_index(zatom[atom_idx]) + zion[beta];
-            Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
-            e_ion -= coeff * (E_ion_erg / (aion[beta] * C::m_p));
+    for (int ispe = 0; ispe < n_active; ++ispe) {
+        const int beta      = active_spec[ispe];
+        const int beta_next = beta + 1;
+
+        // Guard clause: skip invalid or fully ionized species
+        if (beta_next >= NumSpec) continue;
+
+        const int atom_idx = get_atom_index(beta);
+        if (get_atom_index(beta_next) != atom_idx || zion[beta] >= zatom[atom_idx]) {
+            continue;
         }
+
+        // Calculate Uncapped Rates
+        const Real X_beta      = X_stage[beta];
+        const Real X_beta_next = X_stage[beta_next];
+
+        const Real coll_I_d   = X_beta * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
+        const Real coll_I_e   = X_beta * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
+        const Real three_body = X_beta_next * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
+
+        // Convert to volumetric mass production rates (g / cm^3 / s)
+        Real ion_rate = (coll_I_d + coll_I_e) * rho_scale;
+        Real rec_rate = three_body * rho_scale;
+
+        // Cap Rates to Available Material
+        ion_rate = amrex::min(ion_rate, X_beta * dt_inv);
+        rec_rate = amrex::min(rec_rate, X_beta_next * dt_inv);
+
+        const Real net_rate = ion_rate - rec_rate;
+
+        // 3. Update Mass Fraction Sources
+        src(i, j, k, UFS + beta)      -= net_rate;
+        src(i, j, k, UFS + beta_next) += net_rate;
+
+        // 4. Energy Update
+        const int  idx_Eion  = get_energy_index(zatom[atom_idx]) + zion[beta];
+        const Real E_ion_erg = ionization_energy[idx_Eion] * C::ev2erg;
+
+        e_ion -= net_rate * (E_ion_erg / (aion[beta] * C::m_p));
     }
 
     // Update energy source terms
