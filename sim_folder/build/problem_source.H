@@ -27,7 +27,7 @@ void problem_source (int i, int j, int k,
 
     // Initialize species mass fractions and identify active species
     Real X_stage[NumSpec];
-    
+
     // Create mask to identify active species
     bool active_mask[NumSpec] = {false};
     int active_spec[NumSpec];
@@ -35,7 +35,7 @@ void problem_source (int i, int j, int k,
 
     // Extract mass fractions and mark active species
     for (int mu = 0; mu < NumSpec; mu++) {
-        X_stage[mu] = state(i,j,k,UFS+mu) / rho;
+        X_stage[mu] = amrex::Clamp(state(i,j,k,UFS+mu) / rho, 0.0_rt, 1.0_rt);
         
         // Mark species and neighbors as active if mass fraction is above threshold
         if (X_stage[mu] > X_min) {
@@ -44,7 +44,8 @@ void problem_source (int i, int j, int k,
             if (mu > 0 && get_atom_index(mu) == get_atom_index(mu-1)) active_mask[mu-1] = true;
             if (mu < NumSpec-1 && get_atom_index(mu) == get_atom_index(mu+1)) active_mask[mu+1] = true;
         }
-        
+    }
+
         // Build list of active species indices
         if (active_mask[mu]) {
             active_spec[n_active++] = mu;
@@ -98,8 +99,15 @@ void problem_source (int i, int j, int k,
             Real coll_I_d = X_stage[beta] * X_e * coll_ion::get_rate_direct_ion(beta, T_e);
             Real coll_I_e = X_stage[beta] * X_e * coll_ion::get_rate_ex_ion(beta, T_e);
             Real three_body = X_stage[beta+1] * X_e * X_e * coll_ion::get_rate_3body(beta, n_e, rho, T_e);
-            // Net Rate Coefficient
-            Real const coeff = (coll_I_d + coll_I_e - three_body) * (rho * rho / C::m_p);
+            // Convert to volumetric mass production rates (g / cm^3 / s)
+            Real ion_rate = (coll_I_d + coll_I_e) * (rho * rho / C::m_p) * aion_inv[beta];
+            Real rec_rate = three_body * (rho * rho / C::m_p);
+            // Ensure it don't ionize or drain more than available
+            Real max_ion_rate = (dt > 0.0_rt) ? 0.99_rt * (X_stage[beta] * rho / dt) : 0.0_rt;
+            Real max_rec_rate = (dt > 0.0_rt) ? 0.99_rt * (X_stage[beta_next] * rho / dt) : 0.0_rt;
+            ion_rate = amrex::min(ion_rate, max_ion_rate);
+            rec_rate = amrex::min(rec_rate, max_rec_rate);
+            Real const coeff = ion_rate - rec_rate;
             // Update Mass Fraction Sources
             src(i,j,k,UFS+beta)      -= coeff;
             src(i,j,k,UFS+beta_next) += coeff;
