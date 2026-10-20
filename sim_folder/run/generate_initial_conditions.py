@@ -7,12 +7,7 @@ Phys. Rev. Research 5, 033112, 2023):
 - a super-Gaussian ionization fraction (minimal value of 1e-3, so that the
   electron temperature is defined everywhere)
 - a super-Gaussian electron temperature peaking at 27 eV
-
-Usage:
-    python3 generate_initial_conditions.py           # 1D (r), for inputs.1d.cyl
-    python3 generate_initial_conditions.py --dim 2   # 2D (r-z), for inputs.2d.cyl
 """
-import argparse
 import os
 import re
 import sys
@@ -60,37 +55,53 @@ def generate_1d(output_file='example_1d_initial_conditions.h5'):
     print(f'Wrote {output_file}')
 
 
-def generate_2d(output_file='example_2d_initial_conditions.h5'):
+def generate_2d(output_file='example_2d_initial_conditions.h5', geometry='cylindrical'):
+    """
+    Generates 2D openPMD initial conditions.
+    
+    Parameters
+    ----------
+    output_file : str
+        Path to the output HDF5 file.
+    geometry : str, optional
+        'cylindrical' for (r, z) grid or 'cartesian' for (x, z) grid with round radial profiles.
+    """
     species_keys = get_species_keys()
-    r = np.arange(0, r_max + 2e-6, 2e-6)
     z = np.arange(0, z_max + 2e-6, 2e-6)
-    R, Z = np.meshgrid(r, z, indexing='ij')
+    
+    if geometry == 'cylindrical':
+        r = np.arange(0, r_max + 2e-6, 2e-6)
+        R, Z = np.meshgrid(r, z, indexing='ij')
+        r_transverse = R
+        grid_bounds = {'r': [r.min(), r.max()], 'z': [z.min(), z.max()]}
+        grid_shape = (len(r), len(z), len(species_keys))
+        
+    elif geometry == 'cartesian':
+        x = np.arange(-r_max, r_max + 2e-6, 2e-6)
+        X, Z = np.meshgrid(x, z, indexing='ij')
+        r_transverse = np.abs(X)  # Transverse distance from center in 2D (x, z)
+        grid_bounds = {'x': [x.min(), x.max()], 'y': [z.min(), z.max()]}
+        grid_shape = (len(x), len(z), len(species_keys))
+        
+    else:
+        raise ValueError("geometry must be either 'cylindrical' or 'cartesian'")
 
-    # Same radial profiles as in 1D, with a heating that smoothly
-    # vanishes at both ends of the grid in z (focus/defocus of the laser)
-    ioniz_fraction_r, T_eV_r = radial_profiles(R)
-    envelope = np.sin(0.5*np.pi*np.clip(np.minimum(Z, z_max - Z)/z_ramp, 0., 1.))**2
+    # Radial profiles calculated using the transverse radial distance
+    ioniz_fraction_r, T_eV_r = radial_profiles(r_transverse)
+    envelope = np.sin(0.5 * np.pi * np.clip(np.minimum(Z, z_max - Z) / z_ramp, 0., 1.)) ** 2
     ioniz_fraction = (ioniz_fraction_r - 1.e-3) * envelope + 1.e-3
     T_eV = (T_eV_r - Ta) * envelope + Ta
 
-    # Number densities in m^-3, with shape (Nr, Nz, n_species)
-    densities = np.zeros((len(r), len(z), len(species_keys)))
+    # Number densities in m^-3
+    densities = np.zeros(grid_shape)
     densities[:, :, species_keys.index('H0')] = (1 - ioniz_fraction) * n_total
     densities[:, :, species_keys.index('H1')] = ioniz_fraction * n_total
 
-    save_to_openpmd({'r': [r.min(), r.max()], 'z': [z.min(), z.max()]},
-                    densities, T_eV, output_file, species_keys)
-    print(f'Wrote {output_file}')
+    save_to_openpmd(grid_bounds, densities, T_eV, output_file, species_keys)
+    print(f'Wrote {output_file} ({geometry} geometry)')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Generate example initial conditions for CHEQUP')
-    parser.add_argument('--dim', type=int, choices=[1, 2], default=1,
-                        help='Dimension of the initial conditions: 1 (r) or 2 (r-z)')
-    parser.add_argument('--output', type=str, default=None, help='Output file name')
-    args = parser.parse_args()
-
-    if args.dim == 1:
-        generate_1d(args.output or 'example_1d_initial_conditions.h5')
-    else:
-        generate_2d(args.output or 'example_2d_initial_conditions.h5')
+    generate_1d('example_1d_initial_conditions.h5')
+    generate_2d('example_2d_initial_conditions.h5', geometry='cylindrical')
+    generate_2d('example_2d_initial_conditions_cartcoords.h5', geometry='cartesian')
