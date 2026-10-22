@@ -142,9 +142,13 @@ Runs are deterministic. Changing the rank count only perturbs global reductions 
 round-off level. In 1D those perturbations grow to the size of the Newton-tolerance
 effect, which is about three orders of magnitude below the time-discretization error.
 
-### 4. Issue found: Newton failures at large dt (FD Jacobian step too large)
+### 4. Issue found and fixed: Newton failures at large dt (FD Jacobian step too large)
 
-With the default `thd_diffusion.fd_eps = 1e-7`, the Newton line search fails for
+**Fixed: the default is now `fd_eps = 1e-9`.** Sections 1–3 and the `d1d`/`h1d`
+results were produced with the previous default, `fd_eps = 1e-7`; the `e9*` results
+use 1e-9.
+
+With the previous default `thd_diffusion.fd_eps = 1e-7`, the Newton line search fails for
 large dt during the early, steep phase of the expansion. Without hydro, step 1 fails
 at every dt ≥ 1.25e-11 s. At dt = 5e-11 s the first 18 steps fail, and at
 dt = 2e-10 s the first 9 steps fail.
@@ -166,7 +170,13 @@ perturbation is far too large. With `thd_diffusion.fd_eps = 1e-9`:
 * the full-physics series has no failures, and the converged results change by only
   ≤ 3e-7 (dt = 2e-12 s, solver-tolerance level).
 
-Recommendation: make `fd_eps = 1e-9` the default. A more robust fix is to limit
-eps per cell, e.g. `eps <= delta * min_i (E_e,i / |v_i|)`. Also consider aborting,
-or retrying with a smaller dt, instead of returning a zero or partial source when
-Newton fails.
+With the new default, runs are bitwise identical to the `fd_eps = 1e-9` runs above.
+The DESY/COMSOL benchmark physics checks in `tests/test_1d.py` (energy conservation,
+blast radius, density profile) still pass; its checksum was not checked.
+Small max-principle flags remain on some converged solves, with the Te minimum
+lowered by ≤ 0.05 K (≤ 2.5e-5 relative). They were present with the old default
+as well.
+
+Possible further hardening: limit eps per cell, e.g.
+`eps <= delta * min_i (E_e,i / |v_i|)`. Also consider aborting, or retrying with a
+smaller dt, instead of returning a zero or partial source when Newton fails.

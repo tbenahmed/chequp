@@ -49,7 +49,10 @@ struct Params {
     int  max_newton     = 20;
     Real newton_rtol    = 1.0e-6_rt;
     int  max_linesearch = 8;
-    Real fd_eps         = 1.0e-7_rt;   // finite-difference step for J*v
+    // Finite-difference step for J*v. It is scaled by the global energy
+    // norm, so it must stay small enough not to swamp the cold cells at
+    // the front: 1e-7 made the line search fail for stiff steps.
+    Real fd_eps         = 1.0e-9_rt;
 
     // Krylov. max_gmres = 0 auto-sizes from the grid. gmres_rtol is
     // deliberately loose: do not resolve the linear system beyond the
