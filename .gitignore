@@ -1,2 +1,4 @@
 Castro
-.DS_Store
+.DS_Store__pycache__/
+sim_folder/build/*.ex
+sim_folder/build/tmp_build_dir/
