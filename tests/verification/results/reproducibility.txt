@@ -1,0 +1,72 @@
+=== mpi1d_np1 vs mpi1d_np1b
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00063 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00079 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00091 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00102 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00112 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== rep1d_runA vs rep1d_nocache
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00063 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00079 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00091 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00102 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00112 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== mpi1d_np4 vs mpi1d_np4b
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00063 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00079 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00091 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00102 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00112 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== mpi1d_np1 vs mpi1d_np2
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00063 rho_e=8.1e-14 xmom=6.6e-14 rho_H1=2.5e-13 density=5.8e-14 Temp=1.2e-12 rho_f_heavie=1.0e-13  
+plt_1d_00079 rho_e=1.2e-13 xmom=2.9e-14 rho_H1=1.7e-13 density=3.1e-14 Temp=6.9e-13 rho_f_heavie=5.1e-14  
+plt_1d_00091 rho_e=3.3e-14 xmom=2.3e-14 rho_H1=1.3e-13 density=2.3e-14 Temp=2.4e-11 rho_f_heavie=4.7e-13  
+plt_1d_00102 rho_e=2.6e-11 xmom=3.9e-12 rho_H1=1.3e-11 density=1.6e-11 Temp=9.0e-09 rho_f_heavie=2.9e-10  
+plt_1d_00112 rho_e=3.3e-08 xmom=5.0e-09 rho_H1=1.5e-08 density=6.9e-09 Temp=1.5e-05 rho_f_heavie=3.6e-07  
+=== mpi1d_np1 vs mpi1d_np4
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  grids do not match !!!
+plt_1d_00063 rho_e=2.6e-13 xmom=2.2e-13 rho_H1=2.1e-13 density=1.8e-13 Temp=1.0e-12 rho_f_heavie=1.4e-13  grids do not match !!!
+plt_1d_00079 rho_e=3.9e-13 xmom=3.8e-13 rho_H1=2.1e-13 density=2.6e-13 Temp=5.0e-13 rho_f_heavie=2.6e-13  grids do not match !!!
+plt_1d_00091 rho_e=4.4e-13 xmom=5.2e-13 rho_H1=2.0e-13 density=2.7e-13 Temp=4.2e-11 rho_f_heavie=8.4e-13  grids do not match !!!
+plt_1d_00102 rho_e=4.7e-11 xmom=1.3e-12 rho_H1=2.5e-11 density=1.1e-11 Temp=1.7e-08 rho_f_heavie=5.7e-10  
+plt_1d_00112 rho_e=6.4e-08 xmom=6.6e-10 rho_H1=2.9e-08 density=1.2e-08 Temp=2.9e-05 rho_f_heavie=6.9e-07  
+=== rep1d_runA vs rep1d_tight
+plt_1d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_1d_00063 rho_e=2.1e-06 xmom=1.9e-06 rho_H1=2.4e-06 density=1.1e-06 Temp=4.0e-05 rho_f_heavie=2.8e-06  
+plt_1d_00079 rho_e=3.1e-06 xmom=2.3e-06 rho_H1=2.1e-06 density=1.8e-06 Temp=1.6e-05 rho_f_heavie=2.4e-06  
+plt_1d_00091 rho_e=4.2e-06 xmom=4.4e-06 rho_H1=2.2e-06 density=3.2e-06 Temp=3.6e-05 rho_f_heavie=3.5e-06  
+plt_1d_00102 rho_e=4.4e-06 xmom=4.4e-06 rho_H1=2.1e-06 density=2.8e-06 Temp=1.7e-05 rho_f_heavie=2.9e-06  
+plt_1d_00112 rho_e=4.0e-06 xmom=4.4e-06 rho_H1=1.9e-06 density=2.8e-06 Temp=1.9e-05 rho_f_heavie=2.8e-06  
+=== rep2d_np1 vs rep2d_np1b
+plt_2d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00045 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00053 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00058 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00062 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== rep2d_np1 vs rep2d_nocache
+plt_2d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00045 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00053 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00058 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00062 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== rep2d_np4 vs rep2d_np4b
+plt_2d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00045 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00053 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00058 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00062 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+=== rep2d_np1 vs rep2d_np2
+plt_2d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00045 rho_e=3.4e-12 xmom=6.0e-12 rho_H1=5.5e-12 density=3.9e-12 Temp=4.3e-12 rho_f_heavie=5.2e-12  
+plt_2d_00053 rho_e=9.4e-12 xmom=7.3e-12 rho_H1=7.3e-12 density=7.5e-12 Temp=1.2e-11 rho_f_heavie=7.8e-12  
+plt_2d_00058 rho_e=1.1e-11 xmom=7.5e-12 rho_H1=7.6e-12 density=9.4e-12 Temp=1.5e-11 rho_f_heavie=9.9e-12  
+plt_2d_00062 rho_e=8.7e-12 xmom=8.1e-12 rho_H1=8.3e-12 density=7.7e-12 Temp=1.5e-11 rho_f_heavie=8.4e-12  
+=== rep2d_np1 vs rep2d_np4
+plt_2d_00000 rho_e=0.0e+00 xmom=0.0e+00 rho_H1=0.0e+00 density=0.0e+00 Temp=0.0e+00 rho_f_heavie=0.0e+00  
+plt_2d_00045 rho_e=2.5e-12 xmom=4.1e-12 rho_H1=3.9e-12 density=2.7e-12 Temp=3.0e-12 rho_f_heavie=3.7e-12  
+plt_2d_00053 rho_e=6.8e-12 xmom=5.0e-12 rho_H1=5.2e-12 density=5.5e-12 Temp=8.1e-12 rho_f_heavie=5.7e-12  
+plt_2d_00058 rho_e=8.3e-12 xmom=5.2e-12 rho_H1=5.3e-12 density=6.9e-12 Temp=1.0e-11 rho_f_heavie=7.2e-12  
+plt_2d_00062 rho_e=6.3e-12 xmom=5.6e-12 rho_H1=6.0e-12 density=5.6e-12 Temp=1.1e-11 rho_f_heavie=6.1e-12  
