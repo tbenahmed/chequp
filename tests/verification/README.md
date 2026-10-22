@@ -18,6 +18,8 @@ cd ../../tests/verification
 ./run_2d_study.sh            # 2D rz: z-uniform vs 1D, finite column dt sweep (~10 min)
 FCOMPARE=<amrex>/Tools/Plotfile/fcompare.gnu.ex MPIRUN=mpirun ./run_reproducibility.sh
 python plot_convergence.py time_convergence_Te.png "1D full physics=work/res_h1d.json" ...
+python plot_convergence.py --qty=rho time_convergence_rho.png "1D full physics=work/res_h1d.json" ...
+python density_front.py work/runs/h1d_dt      # shock-front radius / peak density vs dt
 ```
 
 `run_2d_study.sh` compares against `h1d_dt2e-12` from `run_1d_study.sh`, so run
@@ -66,6 +68,39 @@ The observed order is p ≈ 0.8–1.0 for every field and every output time (2�
 (`results/res_col2d.txt`): Te 5.8e-2 / 2.9e-2 / 1.3e-2 / 4.2e-3 for
 dt = 1.6e-11 / 8e-12 / 4e-12 / 2e-12 s. Again p ≈ 0.85–1.0 for all fields, and no
 failed solves.
+
+#### Density
+
+![Density time convergence](time_convergence_rho.png)
+
+The density L2 error converges at first order too. With conduction it reaches 6% at
+dt = 1.6e-11 s (1D, 10 ns); without conduction it is only 0.5%. That error is almost
+entirely a **sub-cell shift of the shock front**, which a norm over a steep front
+magnifies. The shock position and peak density themselves are converged
+(`density_front.py`, `results/density_front_*.txt`; R_front is where rho crosses
+(rho_max + rho_0)/2 outside the peak):
+
+| 1D full physics, 10 ns | R_front [um] | shift vs finest | rho_max / rho_0 | rho L2 err |
+|---|---|---|---|---|
+| dt = 1.6e-11 | 241.27 | +1.96 um (0.8%) | 3.248 | 6.1e-2 |
+| dt = 8e-12   | 240.37 | +1.06 um | 3.258 | 3.4e-2 |
+| dt = 4e-12   | 239.81 | +0.50 um | 3.251 | 1.8e-2 |
+| dt = 2e-12   | 239.53 | +0.22 um | 3.245 | 8.2e-3 |
+| dt = 1e-12   | 239.39 | +0.08 um | 3.237 | 2.9e-3 |
+| dt = 5e-13   | 239.31 | – | 3.237 | – |
+
+* The front shift halves with dt (first order) and stays below one cell
+  (dx = 2.34 um) even at the largest dt. The cell-resolution peak radius R_peak is
+  identical (±1 cell) for all dt at every output time.
+* With larger dt the shock runs slightly ahead, because conduction feeds slightly
+  more energy into it. With conduction off, the front shift at 10 ns is only 0.11 um.
+* Peak compression rho_max / rho_0 varies by ≤ 0.8% (1D) and ≤ 1.3% (2D) across all dt.
+* 2D rz column (mid-plane, 4 ns): R_front = 156.75 / 156.28 / 156.00 / 155.82 /
+  155.68 um for dt = 1.6e-11 … 1e-12 s, i.e. ≤ 1.1 um (0.7%, 0.11 cell) at the largest dt.
+
+So shock-position comparisons with COMSOL, such as `check_blast_radius_t_Comsol`
+in `tests/test_1d.py`, are unaffected by the time step at the 1% level, even at
+the default CFL. Point-wise density profiles near the front carry the larger L2 error.
 
 **What drives the error** (1D, Te at 10 ns, dt = 1.6e-11 → 1e-12 s):
 

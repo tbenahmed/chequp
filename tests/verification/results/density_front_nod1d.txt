@@ -1,0 +1,35 @@
+t = 2 ns
+  dt=  1.6e-11  R_peak= 109.0 um  R_front= 113.67 um  rho_max/rho_0= 3.305  rho L2 err=2.63e-03
+  dt=    8e-12  R_peak= 109.0 um  R_front= 113.65 um  rho_max/rho_0= 3.310  rho L2 err=1.18e-03
+  dt=    4e-12  R_peak= 109.0 um  R_front= 113.65 um  rho_max/rho_0= 3.311  rho L2 err=5.83e-04
+  dt=    2e-12  R_peak= 109.0 um  R_front= 113.64 um  rho_max/rho_0= 3.310  rho L2 err=2.56e-04
+  dt=    1e-12  R_peak= 109.0 um  R_front= 113.64 um  rho_max/rho_0= 3.309  rho L2 err=7.89e-05
+  dt=    5e-13  R_peak= 109.0 um  R_front= 113.64 um  rho_max/rho_0= 3.308  rho L2 err=0.00e+00
+t = 4 ns
+  dt=  1.6e-11  R_peak= 158.2 um  R_front= 163.25 um  rho_max/rho_0= 3.205  rho L2 err=4.70e-03
+  dt=    8e-12  R_peak= 158.2 um  R_front= 163.18 um  rho_max/rho_0= 3.219  rho L2 err=2.85e-03
+  dt=    4e-12  R_peak= 158.2 um  R_front= 163.13 um  rho_max/rho_0= 3.228  rho L2 err=1.48e-03
+  dt=    2e-12  R_peak= 158.2 um  R_front= 163.10 um  rho_max/rho_0= 3.230  rho L2 err=5.95e-04
+  dt=    1e-12  R_peak= 158.2 um  R_front= 163.09 um  rho_max/rho_0= 3.230  rho L2 err=2.02e-04
+  dt=    5e-13  R_peak= 158.2 um  R_front= 163.08 um  rho_max/rho_0= 3.230  rho L2 err=0.00e+00
+t = 6 ns
+  dt=  1.6e-11  R_peak= 195.7 um  R_front= 201.48 um  rho_max/rho_0= 3.217  rho L2 err=5.43e-03
+  dt=    8e-12  R_peak= 195.7 um  R_front= 201.46 um  rho_max/rho_0= 3.213  rho L2 err=4.56e-03
+  dt=    4e-12  R_peak= 195.7 um  R_front= 201.43 um  rho_max/rho_0= 3.211  rho L2 err=2.79e-03
+  dt=    2e-12  R_peak= 195.7 um  R_front= 201.38 um  rho_max/rho_0= 3.218  rho L2 err=1.14e-03
+  dt=    1e-12  R_peak= 195.7 um  R_front= 201.36 um  rho_max/rho_0= 3.221  rho L2 err=3.81e-04
+  dt=    5e-13  R_peak= 195.7 um  R_front= 201.35 um  rho_max/rho_0= 3.222  rho L2 err=0.00e+00
+t = 8 ns
+  dt=  1.6e-11  R_peak= 228.5 um  R_front= 233.34 um  rho_max/rho_0= 3.255  rho L2 err=5.87e-03
+  dt=    8e-12  R_peak= 228.5 um  R_front= 233.24 um  rho_max/rho_0= 3.265  rho L2 err=3.89e-03
+  dt=    4e-12  R_peak= 228.5 um  R_front= 233.16 um  rho_max/rho_0= 3.275  rho L2 err=2.21e-03
+  dt=    2e-12  R_peak= 228.5 um  R_front= 233.14 um  rho_max/rho_0= 3.274  rho L2 err=1.01e-03
+  dt=    1e-12  R_peak= 228.5 um  R_front= 233.13 um  rho_max/rho_0= 3.271  rho L2 err=3.76e-04
+  dt=    5e-13  R_peak= 228.5 um  R_front= 233.13 um  rho_max/rho_0= 3.270  rho L2 err=0.00e+00
+t = 10 ns
+  dt=  1.6e-11  R_peak= 256.6 um  R_front= 261.16 um  rho_max/rho_0= 3.258  rho L2 err=5.19e-03
+  dt=    8e-12  R_peak= 256.6 um  R_front= 261.12 um  rho_max/rho_0= 3.257  rho L2 err=3.93e-03
+  dt=    4e-12  R_peak= 256.6 um  R_front= 261.13 um  rho_max/rho_0= 3.242  rho L2 err=2.67e-03
+  dt=    2e-12  R_peak= 256.6 um  R_front= 261.10 um  rho_max/rho_0= 3.240  rho L2 err=1.46e-03
+  dt=    1e-12  R_peak= 256.6 um  R_front= 261.07 um  rho_max/rho_0= 3.241  rho L2 err=5.75e-04
+  dt=    5e-13  R_peak= 256.6 um  R_front= 261.05 um  rho_max/rho_0= 3.242  rho L2 err=0.00e+00
