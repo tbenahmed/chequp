@@ -14,6 +14,7 @@ numba
 scipy
 openpmd-viewer
 openpmd-api
+h5py
 tqdm
 pytools
 matplotlib
