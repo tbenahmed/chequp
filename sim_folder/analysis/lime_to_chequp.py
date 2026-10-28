@@ -1,43 +1,52 @@
 """
-lime_to_chequp.py
------------------
-Utility to read LIME openPMD outputs (one ``openpmd_<step>.h5`` file per z step)
-and write the 2-D (r-z) CHEQUP initial-condition file in openPMD/HDF5 format.
+Convert LIME openPMD diagnostics (openpmd_*.h5) into a 2D CHEQUP input file.
 
-The ionization-level densities of the requested species and the electron
-temperature are stacked along z, mapped onto the CHEQUP species axis read from
-``species.net``, and saved with ``save_to_openpmd``.
+Everything is read from the LIME output files themselves:
+  - r axis : from the openPMD grid attributes (gridSpacing, gridGlobalOffset, gridUnitSI)
+  - z axis : one point per output file, from its "time" attribute
+             (z = c * t, or z = t if LIME already stores the distance there)
 
-Typical usage::
+For every output file, the first row of the stored mode-0 array is read
+(identical to np.array(ds[0]).T[:, 0]) and stacked along z,
+so each field has shape (Nz, Nr). Only that row is read from disk.
+The densities are then mapped onto the CHEQUP species list (read from
+species.net) and written with save_to_openpmd.
 
+Species: "H" (H0, H1), "N" (N0..N5), "Ar" (Ar0..Ar8), "He" (He0..He2),
+or a list of them. Te_eV is always included.
+
+Typical usage
+-------------
     from lime_to_chequp import lime_to_chequp
 
-    data = lime_to_chequp(
-        input_dir="/data/runs/my_lime_run/diags/hdf5",
-        output="/data/chequp/my_case/2d_input.h5",
-        species=["H", "N"],
-        plot=True
-    )
-
+    data = lime_to_chequp("path/to/Test_LIME/diags/hdf5", "CHEQUP_sim/2d_input.h5", species=["H", "N"], plot=True)
 """
 import glob
 import os
 import re
-import sys
-from pathlib import Path
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.constants as spc
-from tqdm import tqdm
 
-MODULE_DIR = Path(__file__).resolve().parent
-sys.path.append(str(MODULE_DIR / "../../initial_condition"))
-from ionization_routines import save_to_openpmd
+try:
+    from tqdm.auto import tqdm
+except ImportError:                                  # no tqdm: plain iteration
+    def tqdm(it, **kwargs):
+        return it
+sys.path.append("/data/dust/user/benahmed/src/Codes/chequp/initial_condition")
+from ionization_routines import save_to_openpmd 
 
-SPECIES_NET = MODULE_DIR / "../build/species.net"
+SPECIES_NET = "/data/dust/user/benahmed/src/Codes/chequp/sim_folder/build/species.net"
 
+# ---------------------------------------------------------------------------
+# Species definitions:
+#   dataset : LIME dataset name pattern
+#   levels  : output name -> ion level
+#   factor  : multiplier applied to the density (H comes from H2 -> 2 atoms)
+# Adjust "dataset" if your LIME species are named differently.
+# ---------------------------------------------------------------------------
 SPECIES = {
     "H":  {"dataset": "n_H2_ionlevel_{}", "factor": 2, "levels": {"n_H0": 0, "n_H1": 2}},
     "N":  {"dataset": "n_N_ionlevel_{}",  "factor": 1, "levels": {f"n_N{k}":  k for k in range(6)}},  # N0..N5
@@ -190,14 +199,20 @@ def lime_to_chequp(input_dir="path_to_lime_output/diags/hdf5",
         print(f"Warning: {skipped} not in species.net, skipped")
     names = [n for n in names if n[2:] in species_keys]
     idx = [species_keys.index(n[2:]) for n in names]
+    factor = np.array([SPECIES[sp]["factor"] for sp in _species_list(species)
+                       for n in SPECIES[sp]["levels"] if n in names])
 
     densities = np.zeros(data[TE_NAME].shape + (len(species_keys),))
-    densities[..., idx] = np.stack([data[n] for n in names], axis=-1) * 2 + density_floor # x 2 for atomic gas
+    densities[..., idx] = np.stack([data[n] for n in names], axis=-1) * factor + density_floor
 
     data.update({"densities": densities, "species_keys": species_keys, "grid": grid})
 
     if output:
-        save_to_openpmd(grid, densities, data[TE_NAME] + te_offset, output, species_keys)
+        # save_to_openpmd reverses the axes, so pass (Nr, Nz) to get (z, r) in the file
+        save_to_openpmd(grid,
+                        np.ascontiguousarray(densities.transpose(1, 0, 2)),   # (Nr, Nz, Nspecies)
+                        np.ascontiguousarray((data[TE_NAME] + te_offset).T),  # (Nr, Nz)
+                        output, species_keys)
         print(f"Wrote CHEQUP input ({len(species_keys)} species, {len(data['z'])} z steps) -> {output}")
 
     if plot:
@@ -216,8 +231,3 @@ def plot_fields(data, names):
         plt.colorbar(label=name)
         plt.title(name)
     plt.show()
-
-
-if __name__ == "__main__":
-    lime_to_chequp("/data/dust/user/benahmed/src/Studies/Test_LIME/diags/hdf5",
-                   "CHEQUP_sim/2d_input.h5", species=["H"], plot=True)
