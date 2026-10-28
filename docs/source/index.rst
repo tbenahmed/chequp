@@ -88,6 +88,7 @@ CHEQUP (Castro-based Hofi Expansion with QUasineutral Plasma) is a module built 
 
    analysis_tool_python
    hipace_to_chequp
+   lime_to_chequp
    chequp_to_fbpic
 
 .. toctree::
